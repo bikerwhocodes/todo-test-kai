@@ -21,10 +21,21 @@ choose a realistic, explainable daily plan.
 | Docker | 29.x + Compose v5 | Runs the pinned PostgreSQL. |
 | PostgreSQL | **17.11** | Pinned in `docker-compose.yml`. Not installed locally — the container provides it. |
 
-Two clones of this repository on one machine both default their Compose
-project name to the directory name and then fight over one container. If you
-hit `password authentication failed`, set `COMPOSE_PROJECT_NAME` and
-`NEXTUP_DB_PORT` in the second clone's `.env.local`.
+Running a **second clone** of this repository on the same machine needs one
+extra step, because both clones otherwise publish port 55433 and derive the
+same Compose project name from their directory name. Export the two overrides
+*before* the first `npm run db:up`, so that the generated `.env.local` and the
+container agree on the port:
+
+```sh
+export NEXTUP_DB_PORT=55434 COMPOSE_PROJECT_NAME=nextup-second
+npm run db:up && npm run db:setup
+```
+
+`env:init` records both in `.env.local`, so later commands need no exports.
+Symptoms of skipping this are `port is already allocated`, or a
+`password authentication failed` immediately after a successful `db:setup` —
+the second clone having reached the first one's database.
 
 A local `psql` is **not** required. If you have one, note that a client older
 than the server (for example Homebrew's 14.x) cannot `pg_dump`/`pg_restore`
