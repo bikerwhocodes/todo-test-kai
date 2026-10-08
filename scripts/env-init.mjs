@@ -10,7 +10,8 @@ if (existsSync(TARGET)) {
 }
 
 const pw = () => randomBytes(24).toString("base64url");
-const [superPw, ownerPw, runtimePw] = [pw(), pw(), pw()];
+const [superPw, ownerPw, runtimePw, authPw] = [pw(), pw(), pw(), pw()];
+const secret = randomBytes(32).toString("base64");
 const HOST = "127.0.0.1:55433";
 
 writeFileSync(
@@ -19,9 +20,13 @@ writeFileSync(
 POSTGRES_PASSWORD=${superPw}
 NEXTUP_OWNER_PASSWORD=${ownerPw}
 NEXTUP_RUNTIME_PASSWORD=${runtimePw}
+NEXTUP_AUTH_PASSWORD=${authPw}
 POSTGRES_SUPERUSER_URL=postgresql://postgres:${superPw}@${HOST}/nextup
 MIGRATION_DATABASE_URL=postgresql://nextup_owner:${ownerPw}@${HOST}/nextup
 DATABASE_URL=postgresql://nextup_runtime:${runtimePw}@${HOST}/nextup
+AUTH_DATABASE_URL=postgresql://nextup_auth:${authPw}@${HOST}/nextup
+BETTER_AUTH_SECRET=${secret}
+BETTER_AUTH_URL=http://localhost:3100
 `,
   { mode: 0o600 },
 );

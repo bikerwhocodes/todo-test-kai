@@ -4,9 +4,9 @@
 // not the migration source and drizzle-kit generate is not used to produce it.
 // tests/schema-drift.test.ts asserts this file and the live database agree on
 // table and column names, so the two cannot drift apart unnoticed.
-import { sql } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
-  boolean, check, date, foreignKey, index, integer, pgTable, smallint,
+  bigint, boolean, check, date, foreignKey, index, integer, pgTable, smallint,
   text, timestamp, unique, uniqueIndex, uuid,
 } from "drizzle-orm/pg-core";
 
@@ -62,6 +62,34 @@ export const verifications = pgTable("verifications", {
   createdAt,
   updatedAt,
 }, (t) => [index("verifications_identifier_idx").on(t.identifier)]);
+
+// Better Auth's rate-limit store (`rateLimit: { storage: "database" }`). Keyed
+// by the library; `lastRequest` is epoch milliseconds, not an instant, so it
+// is bigint rather than timestamptz. No user_id and no RLS: see
+// db/migrations/004_auth_role.sql.
+export const rateLimits = pgTable("rate_limits", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull().default(0),
+  lastRequest: bigint("last_request", { mode: "number" }).notNull().default(0),
+});
+
+// Relations exist only so Better Auth's drizzle adapter can resolve its
+// session-with-user join through db.query. Without them the adapter logs an
+// error and silently falls back to separate queries — correct, but noisy and
+// misleading in logs.
+export const usersRelations = relations(users, ({ many }) => ({
+  sessions: many(sessions),
+  accounts: many(accounts),
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, { fields: [sessions.userId], references: [users.id] }),
+}));
+
+export const accountsRelations = relations(accounts, ({ one }) => ({
+  user: one(users, { fields: [accounts.userId], references: [users.id] }),
+}));
 
 export const projects = pgTable("projects", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),

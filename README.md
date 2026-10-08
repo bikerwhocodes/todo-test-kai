@@ -3,12 +3,14 @@
 A private, web-based task planner that helps freelancers and solo developers
 choose a realistic, explainable daily plan.
 
-> **Release 1.0.0 — account and data foundation.**
-> This release delivers **no planning features**. There is no scheduler, no
-> Inbox/Today/Upcoming view and no suggestion explanation. What it does deliver
-> is the durable, private, owner-safe PostgreSQL foundation those features will
-> stand on, with every structural guarantee covered by tests that run against a
-> real database. Planning arrives in a later release.
+> **Release 1.0.0 — in progress: account and data foundation.**
+> This release delivers **no planning features yet**. There is no scheduler, no
+> Inbox/Today/Upcoming view, no suggestion explanation and **no sign-in UI**.
+> What it does deliver is the durable, private, owner-safe PostgreSQL
+> foundation those features stand on, plus working email/password accounts
+> with enforced account isolation — every structural and isolation guarantee
+> covered by tests that run against a real database. Planning arrives later in
+> this release.
 
 ## Requirements
 
@@ -18,6 +20,11 @@ choose a realistic, explainable daily plan.
 | npm | 11.x | Lockfile is committed; use `npm ci` for a reproducible install. |
 | Docker | 29.x + Compose v5 | Runs the pinned PostgreSQL. |
 | PostgreSQL | **17.11** | Pinned in `docker-compose.yml`. Not installed locally — the container provides it. |
+
+Two clones of this repository on one machine both default their Compose
+project name to the directory name and then fight over one container. If you
+hit `password authentication failed`, set `COMPOSE_PROJECT_NAME` and
+`NEXTUP_DB_PORT` in the second clone's `.env.local`.
 
 A local `psql` is **not** required. If you have one, note that a client older
 than the server (for example Homebrew's 14.x) cannot `pg_dump`/`pg_restore`
@@ -31,7 +38,7 @@ From a clean clone, four commands:
 ```sh
 npm ci          # install exactly the locked dependency versions
 npm run db:up   # generate .env.local, then start PostgreSQL 17.11
-npm run db:setup # create the two database roles, then migrate
+npm run db:setup # create the three database roles, then migrate
 npm run dev     # http://127.0.0.1:3100
 ```
 
@@ -44,7 +51,7 @@ Confirm it worked:
 
 ```sh
 curl -s http://127.0.0.1:3100/api/health
-# {"ok":true,"postgres":"17.11 (...)","migrationsApplied":3,
+# {"ok":true,"postgres":"17.11 (...)","migrationsApplied":4,
 #  "role":"nextup_runtime","roleSafe":true}
 ```
 
@@ -57,19 +64,20 @@ curl -s http://127.0.0.1:3100/api/health
 | `npm test` | Full suite against the real database. Runs sequentially: one test restarts the database. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run db:migrate` | Apply pending migrations. Re-running is a no-op. |
-| `npm run guard` | Assert the runtime role cannot bypass row-level security. |
+| `npm run guard` | Assert the runtime role cannot bypass row-level security, and that RLS covers every user-scoped table. |
 | `npm run db:psql` | A `psql` shell using the container's own matching client. |
 | `npm run db:reset` | **Destroys the local database volume** and rebuilds from empty. |
 | `npm run db:down` | Stop the database, keeping its data. |
 
 ## How this is put together
 
-### Two database roles
+### Three database roles
 
-| Role | Owns tables | Used by | Superuser / BYPASSRLS |
-|---|---|---|---|
-| `nextup_owner` | yes | migrations only | no |
-| `nextup_runtime` | **no** | the application | **no** |
+| Role | Owns tables | Used by | Reaches | Superuser / BYPASSRLS |
+|---|---|---|---|---|
+| `nextup_owner` | yes | migrations only | everything | no |
+| `nextup_runtime` | **no** | the application | the six user tables, plus **own-row only** on `users` | **no** |
+| `nextup_auth` | **no** | `lib/auth.ts` only | `users`, `sessions`, `accounts`, `verifications`, `rate_limits` — and **nothing else** | **no** |
 
 This split is load-bearing rather than tidy-minded. `ENABLE ROW LEVEL SECURITY`
 does **not** constrain a table's owner: with `ENABLE` alone, the owner sees
@@ -80,7 +88,22 @@ not own the tables and cannot bypass the policies.
 Because that failure mode is silent — the application keeps working while
 returning other people's data — `db/guard.ts` asserts the connected role is
 safe and crashes loudly if it is not. `npm run guard` runs it, CI runs it, and
-`/api/health` reports it.
+`/api/health` reports it. The guard also checks that **every** user-scoped
+table carries `ENABLE` + `FORCE`, and that no table exists which is in neither
+that list nor a documented exemption — because the realistic mistake is not a
+misconfigured connection but a new table shipped with no policy.
+
+**Why `nextup_auth` is a third role rather than wider grants on
+`nextup_runtime`.** Sign-in has to read a user by email and a session by its
+cookie token *before* the request has any identity, so an `app.user_id` policy
+cannot express it. Widening the runtime role to cover those tables would hand
+every application query the ability to read every session token in the
+database. Instead the privilege lives in one role used by one file, and the two
+roles' grants are disjoint: application code cannot read a session token, and
+the auth library cannot read anyone's tasks. `users` keeps `FORCE` row-level
+security, with a second policy scoped `TO nextup_auth` so the widened view
+cannot leak to the runtime role — enforced by Postgres, not by remembering to
+filter. Tests assert both denials directly, as each role.
 
 ### Request identity
 
@@ -95,6 +118,33 @@ The policies read identity through `nullif(current_setting('app.user_id', true),
 The `nullif` matters: unset, `current_setting` returns an **empty string**, and
 casting `''` to `uuid` *raises* rather than denying — turning a missing identity
 into a 500 instead of an empty result. Wrapped, the policy fails closed.
+
+### Accounts and sessions
+
+Email and password, via Better Auth 1.7.7 mounted at `/api/auth/*`.
+
+| Property | Choice |
+|---|---|
+| Password hashing | **scrypt** (Better Auth's default, native `node:crypto`). The PRD *proposed* Argon2id; scrypt is the recorded decision. A9 is satisfied **by scrypt** — do not read it as an Argon2id claim. |
+| Ids | `uuid`, via `advanced.database.generateId: "uuid"`. The library's default base62 string would be rejected by the `uuid` columns. |
+| Sessions | Rows in `sessions`, 7-day expiry. Sign-out **deletes the row**, so a kept cookie cannot be replayed. |
+| Cookies | `HttpOnly`, `SameSite=Lax`, `Path=/`; `Secure` in production. Asserted by test rather than assumed. |
+| CSRF | On. One explicit `trustedOrigins` entry; `disableCSRFCheck` is never set. |
+| Rate limiting | On **in every environment** (the library default disables it in development), persisted in `rate_limits`, 100/min generally and 5/min on sign-in and sign-up. |
+
+**Another user's resource returns `404`, never `403`.** A 403 confirms that the
+resource exists, which is an enumeration oracle. `lib/http.ts` has no 403 in
+its status table, so a handler cannot return one by accident, and a test fails
+the build if `403` appears anywhere in `lib/`, `db/` or `src/`.
+
+Isolation is two independent layers: every repository function in `db/` takes
+the caller's id as its **first** parameter and adds `AND user_id = $n`, and
+row-level security enforces the same thing underneath. A test asserts the
+second layer alone still blocks a cross-owner read, so the application
+predicate is a redundancy rather than the only thing holding.
+
+**No sign-in UI yet.** The endpoints work and are tested; the forms are a later
+item.
 
 ### Owner-safe relationships
 
@@ -176,31 +226,50 @@ control that shows the unlocked path corrupting the graph.
 npm test
 ```
 
-54 tests against real PostgreSQL 17.11. No mocks and no in-memory substitute:
-every guarantee in this release is a database guarantee, and a mock cannot
+83 tests against real PostgreSQL 17.11. No mocks and no in-memory substitute:
+every guarantee here is a database or an auth guarantee, and a mock cannot
 evidence one.
 
 Isolation tests connect as **`nextup_runtime`**, the role the application
-actually uses. A privilege test that passes as the owner or the superuser is
-vacuous, so none are written that way. Fixtures use the superuser, because
-`FORCE ROW LEVEL SECURITY` subjects even the owner to its policies.
+actually uses, and the auth-role denials connect as **`nextup_auth`**. A
+privilege test that passes as the owner or the superuser is vacuous, so none
+are written that way. Fixtures use the superuser, because `FORCE ROW LEVEL
+SECURITY` subjects even the owner to its policies.
 
-## Not in this release
+The account tests sign real accounts up and in through Better Auth's own
+handler and then call the route handlers directly, in process — the same entry
+points the app uses, so cookies, CSRF checks, rate limiting, scrypt hashing and
+every database write are real. **There is no browser in the loop**: no
+Playwright, no real cross-origin request, no UI. Browser-level behaviour is
+therefore unverified.
+
+The suite was mutation-tested rather than only observed passing. Returning 403
+instead of 404 fails three tests; granting the runtime role `SELECT` on
+`sessions` fails one; sourcing identity from anything but the signed cookie
+fails twelve. Two gaps that exercise found are now closed by tests of their
+own: a forged or tampered session cookie, and the row-level-security backstop
+holding when a repository forgets its `AND user_id` predicate.
+
+## Not built yet
 
 No scheduler or suggestions · no task-capture or planning UI · no
 Inbox/Today/Upcoming/Projects views · no deployment or hosting · no
 collaboration · no billing · no native apps · no external calendar integration
 · no natural-language date parsing.
 
-Sign-up, sign-in and sign-out are **not implemented here**. The identity tables
-(`users`, `sessions`, `accounts`, `verifications`) are migrated in this release
-in Better Auth's expected shape — with UUID ids and `timestamptz` instants
-rather than the library's `text`/naive-timestamp defaults — so that wiring the
-library is configuration rather than a schema rebuild. **Better Auth is
-installed but not wired up, and nothing here has been exercised through it.**
+**No UI for sign-up, sign-in or sign-out.** The endpoints exist, work and are
+tested; the forms are a later item.
 
-The runtime role holds **no privileges on `sessions`, `accounts` or
-`verifications`**. Those tables are read before a request has any identity
-(looking a user up by email, a session up by token), which an `app.user_id`
-policy cannot express. Protecting them needs a separate auth role, and that
-belongs with the work that actually wires the auth library.
+**Only `/api/projects` exists.** It is here because proving "another user's
+resource is a 404" needs at least one real read-by-id route. Tasks,
+dependencies, recurrence rules and plans have no HTTP routes yet; when they
+arrive they inherit the same `requireUser()` + first-parameter-is-the-owner
+pattern, which is what is proven here.
+
+**No password reset and no email verification**, by decision rather than
+oversight: a forgotten password means a lost account. Also absent: MFA, account
+deletion and export, and brute-force lockout beyond rate limiting.
+
+**No migration rollback.** Migrations are forward-only and append-only; there
+is no `down` script and none is faked. Local recovery is `npm run db:reset`,
+which destroys the volume.

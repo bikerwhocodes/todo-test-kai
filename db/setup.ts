@@ -1,9 +1,16 @@
-// Creates the two application roles as the superuser, then migrates as the
+// Creates the application roles as the superuser, then migrates as the
 // migration owner. Idempotent: safe to re-run.
 //
 // The separation is the whole point. The migration owner owns every table; the
-// runtime role owns nothing, so it cannot turn off the row-level security that
-// constrains it.
+// runtime and auth roles own nothing, so neither can turn off the row-level
+// security that constrains it.
+//
+// Three roles, because two were not enough:
+//   nextup_owner   — owns every table, runs migrations, never used at runtime.
+//   nextup_runtime — the application. DML on the six user tables, own-row
+//                    access to `users`, and NOTHING on the session tables.
+//   nextup_auth    — the auth library only. DML on the four identity tables
+//                    and NOTHING on the six user tables. See 004_auth_role.sql.
 import pg from "pg";
 import { migrate } from "./migrate.ts";
 
@@ -21,6 +28,7 @@ async function ensureRoles(): Promise<void> {
     // format(%L) inside the DO block, so they are never spliced into SQL text.
     await client.query("SELECT set_config('nextup.owner_pw', $1, false)", [required("NEXTUP_OWNER_PASSWORD")]);
     await client.query("SELECT set_config('nextup.runtime_pw', $1, false)", [required("NEXTUP_RUNTIME_PASSWORD")]);
+    await client.query("SELECT set_config('nextup.auth_pw', $1, false)", [required("NEXTUP_AUTH_PASSWORD")]);
 
     await client.query(`
       DO $$
@@ -29,7 +37,8 @@ async function ensureRoles(): Promise<void> {
       BEGIN
         FOR r IN SELECT * FROM (VALUES
           ('nextup_owner',   'nextup.owner_pw'),
-          ('nextup_runtime', 'nextup.runtime_pw')
+          ('nextup_runtime', 'nextup.runtime_pw'),
+          ('nextup_auth',    'nextup.auth_pw')
         ) AS v(role, guc) LOOP
           IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r.role) THEN
             EXECUTE format('ALTER ROLE %I LOGIN PASSWORD %L', r.role, current_setting(r.guc));
@@ -46,7 +55,8 @@ async function ensureRoles(): Promise<void> {
 
     await client.query("GRANT CREATE, USAGE ON SCHEMA public TO nextup_owner");
     await client.query("GRANT USAGE ON SCHEMA public TO nextup_runtime");
-    console.log("Roles nextup_owner and nextup_runtime are present and non-privileged.");
+    await client.query("GRANT USAGE ON SCHEMA public TO nextup_auth");
+    console.log("Roles nextup_owner, nextup_runtime and nextup_auth are present and non-privileged.");
   } finally {
     await client.end();
   }
