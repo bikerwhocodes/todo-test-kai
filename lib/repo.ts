@@ -16,6 +16,31 @@ import { withUser } from "../db/client.ts";
 import { addDependency } from "../db/dependencies.ts";
 import { notFound } from "./http.ts";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Guards every id that is about to name a row in SQL.
+ *
+ * Without this, a non-UUID path segment reached Postgres and raised
+ * `22P02 invalid input syntax for type uuid`, which surfaced as **500
+ * INTERNAL** on eight endpoints — `GET /api/tasks/abc` and friends. A 500 for
+ * user-supplied input is wrong twice over: it reports a server fault for a
+ * client mistake, and it fills the logs with noise that hides real faults.
+ *
+ * The answer is 404, not 422, and the same 404 every other unknown id gets.
+ * A malformed id cannot name a row, so "no such row you own" is exactly true —
+ * and it keeps malformed, foreign and nonexistent ids **indistinguishable**,
+ * which is what A3 requires. A 422 here would leak that an id was well-formed,
+ * re-introducing in miniature the enumeration oracle the 404 rule removes.
+ *
+ * This lives in the repository rather than in each route so a new route cannot
+ * forget it: there is no way to query without passing through here.
+ */
+const rowId = (v: string): string => {
+  if (!UUID.test(v)) throw notFound();
+  return v;
+};
+
 export type Project = { id: string; name: string; archivedAt: string | null; createdAt: string };
 export type Task = {
   id: string; title: string; notes: string | null; priority: number;
@@ -32,9 +57,36 @@ const TASK_COLS = `
   deadline, start_date AS "startDate",
   completed_at AS "completedAt", created_at AS "createdAt"`;
 
-/** Date columns come back as JS Dates; a calendar date must stay YYYY-MM-DD (P4). */
-const asDate = (v: unknown): string | null =>
-  v == null ? null : v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+/**
+ * Serialises a `date` column as YYYY-MM-DD (P4).
+ *
+ * **Do not reach for `toISOString()` here.** `pg` parses a `date` column into a
+ * JS `Date` at **local midnight**, and `toISOString()` re-reads that instant in
+ * UTC — which moves the day BACKWARDS for every timezone east of UTC.
+ * Reproduced against the real database before this fix: a task stored with
+ * `deadline = 2026-12-01` was reported by the API as **2026-11-30** under
+ * `TZ=Pacific/Auckland` and under `TZ=Europe/Berlin`, while `TZ=UTC` and
+ * `TZ=America/Edmonton` looked correct. So it was silent, wrong for roughly
+ * half the world, and invisible to a UTC CI runner.
+ *
+ * This is the exact off-by-one `tests/dates.test.ts` already demonstrates for
+ * the *storage* model — the schema was right and the serialisation layer
+ * reintroduced the bug on the two fields day planning keys on.
+ *
+ * Reading the local components back out is correct because local midnight is
+ * precisely what the parsed value represents. `tests/dates.test.ts` now pins
+ * it, and CI runs the whole suite a second time under an eastern timezone.
+ */
+const asDate = (v: unknown): string | null => {
+  if (v == null) return null;
+  // Already a plain `YYYY-MM-DD` (e.g. a `::text` cast) — nothing to convert.
+  if (typeof v === "string") return v.slice(0, 10);
+  if (v instanceof Date) {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${v.getFullYear()}-${pad(v.getMonth() + 1)}-${pad(v.getDate())}`;
+  }
+  return String(v);
+};
 
 const asInstant = (v: unknown): string | null =>
   v == null ? null : v instanceof Date ? v.toISOString() : String(v);
@@ -80,7 +132,7 @@ export const createProject = (userId: string, name: string): Promise<Project> =>
 export const getProject = (userId: string, id: string): Promise<Project> =>
   withUser(userId, async (c) => {
     const { rows } = await c.query(
-      `SELECT ${PROJECT_COLS} FROM projects WHERE id = $1 AND user_id = $2`, [id, userId]);
+      `SELECT ${PROJECT_COLS} FROM projects WHERE id = $1 AND user_id = $2`, [rowId(id), userId]);
     // Missing and not-yours are the same answer (A3).
     if (!rows[0]) throw notFound();
     return toProject(rows[0]);
@@ -90,7 +142,7 @@ export const renameProject = (userId: string, id: string, name: string): Promise
   withUser(userId, async (c) => {
     const { rows } = await c.query(
       `UPDATE projects SET name = $3 WHERE id = $1 AND user_id = $2 RETURNING ${PROJECT_COLS}`,
-      [id, userId, name]);
+      [rowId(id), userId, name]);
     if (!rows[0]) throw notFound();
     return toProject(rows[0]);
   });
@@ -98,7 +150,7 @@ export const renameProject = (userId: string, id: string, name: string): Promise
 export const deleteProject = (userId: string, id: string): Promise<void> =>
   withUser(userId, async (c) => {
     const { rowCount } = await c.query(
-      "DELETE FROM projects WHERE id = $1 AND user_id = $2", [id, userId]);
+      "DELETE FROM projects WHERE id = $1 AND user_id = $2", [rowId(id), userId]);
     if (!rowCount) throw notFound();
   });
 
@@ -109,7 +161,7 @@ export const listTasks = (userId: string, projectId?: string): Promise<Task[]> =
     const { rows } = projectId
       ? await c.query(
           `SELECT ${TASK_COLS} FROM tasks WHERE user_id = $1 AND project_id = $2 ORDER BY created_at`,
-          [userId, projectId])
+          [userId, rowId(projectId)])
       : await c.query(
           `SELECT ${TASK_COLS} FROM tasks WHERE user_id = $1 ORDER BY created_at`, [userId]);
     return rows.map(toTask);
@@ -134,8 +186,10 @@ export const createTask = (userId: string, t: NewTask): Promise<Task> =>
                             estimate_minutes, deadline, start_date)
          VALUES ($1, $2, $3, coalesce($4, 3), $5, $6, $7, $8, $9)
          RETURNING ${TASK_COLS}`,
-        [userId, t.title, t.notes ?? null, t.priority ?? null, t.projectId ?? null,
-         t.parentTaskId ?? null, t.estimateMinutes ?? null, t.deadline ?? null, t.startDate ?? null]);
+        [userId, t.title, t.notes ?? null, t.priority ?? null,
+         t.projectId == null ? null : rowId(t.projectId),
+         t.parentTaskId == null ? null : rowId(t.parentTaskId),
+         t.estimateMinutes ?? null, t.deadline ?? null, t.startDate ?? null]);
       return toTask(rows[0]!);
     } catch (err) {
       if ((err as { code?: string }).code === "23503") throw notFound();
@@ -146,7 +200,7 @@ export const createTask = (userId: string, t: NewTask): Promise<Task> =>
 export const getTask = (userId: string, id: string): Promise<Task> =>
   withUser(userId, async (c) => {
     const { rows } = await c.query(
-      `SELECT ${TASK_COLS} FROM tasks WHERE id = $1 AND user_id = $2`, [id, userId]);
+      `SELECT ${TASK_COLS} FROM tasks WHERE id = $1 AND user_id = $2`, [rowId(id), userId]);
     if (!rows[0]) throw notFound();
     return toTask(rows[0]);
   });
@@ -161,6 +215,9 @@ export const updateTask = (userId: string, id: string, patch: Record<string, unk
   withUser(userId, async (c) => {
     const keys = Object.keys(patch).filter((k) => k in EDITABLE);
     if (keys.length === 0) throw notFound();
+    // A body-supplied project id is a row address too, so it gets the same
+    // guard and the same 404 a foreign project id already gets.
+    if (patch.projectId != null) patch.projectId = rowId(String(patch.projectId));
     // Column names come from the EDITABLE allowlist, never from the request,
     // so no request key reaches the SQL text; values stay bound.
     const sets = keys.map((k, i) => `${EDITABLE[k]} = $${i + 3}`).join(", ");
@@ -168,7 +225,7 @@ export const updateTask = (userId: string, id: string, patch: Record<string, unk
       const { rows } = await c.query(
         `UPDATE tasks SET ${sets}, updated_at = now()
           WHERE id = $1 AND user_id = $2 RETURNING ${TASK_COLS}`,
-        [id, userId, ...keys.map((k) => patch[k])]);
+        [rowId(id), userId, ...keys.map((k) => patch[k])]);
       if (!rows[0]) throw notFound();
       return toTask(rows[0]);
     } catch (err) {
@@ -180,7 +237,7 @@ export const updateTask = (userId: string, id: string, patch: Record<string, unk
 export const deleteTask = (userId: string, id: string): Promise<void> =>
   withUser(userId, async (c) => {
     const { rowCount } = await c.query(
-      "DELETE FROM tasks WHERE id = $1 AND user_id = $2", [id, userId]);
+      "DELETE FROM tasks WHERE id = $1 AND user_id = $2", [rowId(id), userId]);
     if (!rowCount) throw notFound();
   });
 
@@ -198,7 +255,7 @@ export const linkDependency = (userId: string, taskId: string, dependsOnId: stri
   withUser(userId, async (c: pg.PoolClient) => {
     const { rows } = await c.query<{ n: string }>(
       "SELECT count(*)::text AS n FROM tasks WHERE user_id = $1 AND id = ANY($2::uuid[])",
-      [userId, [taskId, dependsOnId]]);
+      [userId, [rowId(taskId), rowId(dependsOnId)]]);
     // Both ids must resolve to the caller's own tasks. A foreign id is
     // indistinguishable from a missing one.
     const wanted = taskId === dependsOnId ? 1 : 2;

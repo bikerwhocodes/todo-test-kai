@@ -88,10 +88,15 @@ test("AT-36: a cross-account mutation 404s and leaves the victim's row untouched
 
   // Read back as the superuser: the assertion is about the stored row, not
   // about what the API chose to echo.
-  const { rows } = await superPool.query<{ title: string; deadline: Date }>(
-    "SELECT title, deadline FROM tasks WHERE id = $1", [task.id]);
+  // `deadline::text` rather than reading the Date and calling toISOString():
+  // pg parses a `date` into LOCAL midnight, so toISOString() shifts the day in
+  // any timezone east of UTC. This assertion previously failed under
+  // TZ=Pacific/Auckland for that reason — the test carried the same defect as
+  // the code it was checking. Casting in SQL sidesteps the Date entirely.
+  const { rows } = await superPool.query<{ title: string; deadline: string }>(
+    "SELECT title, deadline::text AS deadline FROM tasks WHERE id = $1", [task.id]);
   assert.equal(rows[0]?.title, "A's task", "the victim's title must be unchanged");
-  assert.equal(rows[0]?.deadline?.toISOString().slice(0, 10), "2026-12-01");
+  assert.equal(rows[0]?.deadline, "2026-12-01");
 });
 
 test("AT-36: a cross-account delete 404s and deletes nothing", async () => {
@@ -246,4 +251,103 @@ test("P5: /api/me reads and updates only the caller's own row", async () => {
   const byId = new Map(rows.map((r) => [r.id, r.timezone]));
   assert.equal(byId.get(a.userId), "Europe/Lisbon");
   assert.equal(byId.get(b.userId), "UTC");
+});
+
+test("a malformed path id returns 404, never 500 — and never reveals it was malformed", async () => {
+  // Regression: a non-UUID path segment reached Postgres, raised
+  // `22P02 invalid input syntax for type uuid`, and surfaced as 500 INTERNAL
+  // on eight endpoints. A 500 for user input reports a server fault for a
+  // client mistake and buries real faults in log noise.
+  //
+  // The answer must be the SAME 404 a nonexistent id gets: a 422 would leak
+  // that an id was well-formed, which is the enumeration oracle in miniature.
+  const [a] = await signUpTwo();
+  const absent = "00000000-0000-4000-8000-000000000000";
+  const reference = await getTask(authed(`/api/tasks/${absent}`, a), params(absent));
+  const expected = await reference.json();
+
+  for (const bad of ["abc", "not-a-uuid", "1", "%20", "", "../../etc/passwd",
+                     "00000000-0000-4000-8000-00000000000"]) {
+    const calls: [string, Promise<Response>][] = [
+      [`GET /api/tasks/${bad}`, getTask(authed(`/api/tasks/${bad}`, a), params(bad))],
+      [`PATCH /api/tasks/${bad}`, patchTask(authed(`/api/tasks/${bad}`, a, { method: "PATCH", body: JSON.stringify({ title: "x" }) }), params(bad))],
+      [`DELETE /api/tasks/${bad}`, deleteTask(authed(`/api/tasks/${bad}`, a, { method: "DELETE" }), params(bad))],
+      [`GET /api/projects/${bad}`, getProject(authed(`/api/projects/${bad}`, a), params(bad))],
+      [`PATCH /api/projects/${bad}`, patchProject(authed(`/api/projects/${bad}`, a, { method: "PATCH", body: JSON.stringify({ name: "x" }) }), params(bad))],
+      [`DELETE /api/projects/${bad}`, deleteProject(authed(`/api/projects/${bad}`, a, { method: "DELETE" }), params(bad))],
+      [`POST /api/tasks/${bad}/dependencies`, linkDependency(authed(`/api/tasks/${bad}/dependencies`, a, { method: "POST", body: JSON.stringify({ dependsOnId: absent }) }), params(bad))],
+    ];
+    for (const [name, p] of calls) {
+      const res = await p;
+      assert.equal(res.status, 404, `${name} must be 404, not ${res.status}`);
+      if (res.status === 404) {
+        assert.deepEqual(await res.json(), expected,
+          `${name} must be byte-identical to a nonexistent id's response`);
+      }
+    }
+  }
+});
+
+test("a malformed id in a request BODY also returns 404, like a foreign one", async () => {
+  const [a] = await signUpTwo();
+  const mine = (await json(await createTask(
+    authed("/api/tasks", a, { method: "POST", body: JSON.stringify({ title: "mine" }) }),
+  ))).task;
+
+  for (const body of [{ title: "x", projectId: "abc" }, { title: "x", parentTaskId: "abc" }]) {
+    const res = await createTask(authed("/api/tasks", a, { method: "POST", body: JSON.stringify(body) }));
+    assert.equal(res.status, 404, `POST with ${JSON.stringify(body)} must be 404, not ${res.status}`);
+  }
+  const patched = await patchTask(
+    authed(`/api/tasks/${mine.id}`, a, { method: "PATCH", body: JSON.stringify({ projectId: "abc" }) }),
+    params(mine.id));
+  assert.equal(patched.status, 404, "PATCH with a malformed projectId must be 404");
+
+  // The task was not half-written by any rejected call.
+  const after = (await json(await listTasks(authed("/api/tasks", a)))).tasks;
+  assert.deepEqual(after.map((t: any) => t.id), [mine.id]);
+});
+
+test("P4: a calendar date round-trips through the API as the SAME day", async () => {
+  // The defect this pins: pg parses a `date` into LOCAL midnight, and
+  // `toISOString()` re-reads that instant in UTC, moving the day BACKWARDS
+  // for every timezone east of UTC. Reproduced against the real database:
+  // a deadline stored as 2026-12-01 was reported as 2026-11-30 under
+  // TZ=Pacific/Auckland and TZ=Europe/Berlin, while TZ=UTC looked fine.
+  //
+  // This assertion is timezone-independent — it compares what the API returns
+  // against what Postgres actually stores — so it holds everywhere and fails
+  // everywhere east of UTC without the fix. `npm run test:tz` runs the whole
+  // suite under an eastern zone, which is what makes the class catchable at all.
+  const [a] = await signUpTwo();
+  const DEADLINE = "2026-12-01";
+  const START = "2026-11-20";
+
+  const created = (await json(await createTask(authed("/api/tasks", a, {
+    method: "POST",
+    body: JSON.stringify({ title: "dated", deadline: DEADLINE, startDate: START }),
+  })))).task;
+
+  const { rows } = await superPool.query<{ deadline: string; start_date: string }>(
+    "SELECT deadline::text AS deadline, start_date::text AS start_date FROM tasks WHERE id = $1",
+    [created.id]);
+  assert.equal(rows[0]?.deadline, DEADLINE, "Postgres must store the day it was sent");
+  assert.equal(rows[0]?.start_date, START);
+
+  // Every read path must agree with storage, not just the create response.
+  assert.equal(created.deadline, rows[0]?.deadline, "POST response disagrees with storage");
+  assert.equal(created.startDate, rows[0]?.start_date);
+
+  const fetched = (await json(await getTask(authed(`/api/tasks/${created.id}`, a), params(created.id)))).task;
+  assert.equal(fetched.deadline, DEADLINE, "GET /:id disagrees with storage");
+  assert.equal(fetched.startDate, START);
+
+  const listed = (await json(await listTasks(authed("/api/tasks", a)))).tasks
+    .find((t: any) => t.id === created.id);
+  assert.equal(listed.deadline, DEADLINE, "list disagrees with storage");
+  assert.equal(listed.startDate, START);
+
+  // And a calendar date is never serialised as an instant (P4).
+  assert.match(fetched.deadline, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(!String(fetched.deadline).includes("T"), "a calendar date must not carry a time");
 });

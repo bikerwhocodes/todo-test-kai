@@ -10,6 +10,10 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 export const GET = (req: Request): Promise<Response> =>
   handle(async () => {
     const userId = await requireUser(req);
+    // Here `projectId` is a FILTER over a collection, not a row address, so a
+    // malformed value is a genuine request-validation error rather than a
+    // missing row. It leaks nothing: a well-formed id belonging to someone
+    // else returns an empty list, exactly as an owned-but-empty project does.
     const projectId = new URL(req.url).searchParams.get("projectId");
     if (projectId !== null && !UUID.test(projectId)) {
       throw invalid("projectId must be a UUID.", { path: ["projectId"] });
@@ -25,10 +29,15 @@ export const POST = (req: Request): Promise<Response> =>
     if (!title) throw invalid("title is required.", { path: ["title"] });
 
     const t: NewTask = { title };
+    // `projectId` / `parentTaskId` are row ADDRESSES, so they are deliberately
+    // NOT validated into a 422 here. The repository guards them and answers
+    // 404 — the same answer a foreign or nonexistent id gets, which keeps
+    // malformed, foreign and missing indistinguishable (A3). A 422 would leak
+    // that an id was at least well-formed.
     for (const key of ["projectId", "parentTaskId"] as const) {
       const v = b?.[key];
       if (v == null) continue;
-      if (typeof v !== "string" || !UUID.test(v)) throw invalid(`${key} must be a UUID.`, { path: [key] });
+      if (typeof v !== "string") throw invalid(`${key} must be a string UUID.`, { path: [key] });
       t[key] = v;
     }
     for (const key of ["deadline", "startDate"] as const) {

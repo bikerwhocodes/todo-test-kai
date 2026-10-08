@@ -12,3 +12,6 @@ next-env.d.ts
 
 .DS_Store
 npm-debug.log*
+
+# Local tooling scaffolding (Serena MCP), not project configuration.
+.serena/

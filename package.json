@@ -20,7 +20,8 @@
     "build": "next build",
     "start": "next start -p 3100",
     "typecheck": "tsc --noEmit",
-    "db:restart": "docker compose --env-file .env.local restart db"
+    "db:restart": "docker compose --env-file .env.local restart db",
+    "test:tz": "TZ=Pacific/Auckland npm test"
   },
   "dependencies": {
     "better-auth": "1.7.7",

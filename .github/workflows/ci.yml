@@ -48,6 +48,15 @@ jobs:
       - name: Test
         run: npm test
 
+      # The same suite again, east of UTC. This is not belt-and-braces: a
+      # calendar-date bug is INVISIBLE at UTC and wrong in roughly half the
+      # world, so a UTC-only runner structurally cannot catch the class. It
+      # already caught one real defect — `date` columns were serialised with
+      # toISOString(), reporting the previous day for every positive offset.
+      # Cheap insurance: the suite is ~30s.
+      - name: Test again east of UTC (catches calendar-date off-by-one)
+        run: npm run test:tz
+
       - name: Build
         run: npm run build
 

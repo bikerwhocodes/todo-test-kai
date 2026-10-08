@@ -64,6 +64,7 @@ touching the passwords already in it.
 | Command | What it does |
 |---|---|
 | `npm test` | Full suite against the real database. Runs sequentially: one test restarts the database. |
+| `npm run test:tz` | **The same suite again, east of UTC** (`TZ=Pacific/Auckland`). Not redundant — see *Why the suite runs twice*. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run db:migrate` | Apply pending migrations. Re-running is a no-op. |
 | `npm run guard` | Assert the runtime role cannot bypass row-level security. |
@@ -147,6 +148,22 @@ first sign-in.
 Account creation belongs to the auth role: the runtime role has **no `INSERT`
 on `users`**, so the application cannot mint accounts outside the auth path.
 
+### Why the suite runs twice
+
+CI runs the whole suite a second time under `TZ=Pacific/Auckland`, because a
+calendar-date bug is **invisible at UTC and wrong in roughly half the world**.
+That is not hypothetical: `date` columns were being serialised with
+`toISOString()`, which re-reads a local-midnight `Date` in UTC and so reports
+the **previous day** for every positive offset. A task stored with
+`deadline = 2026-12-01` came back as `2026-11-30` in Auckland and Berlin, and
+looked perfect in UTC and Edmonton.
+
+A UTC-only runner **structurally cannot** catch that class, so the second run
+is the guard, not the test. The suite is ~30s; the insurance is cheap.
+
+`pg` parses a `date` into a `Date` at local midnight. Read it back with local
+components (or cast to `::text` in SQL) — never `toISOString()`.
+
 ### Another user's id returns 404, never 403
 
 A `403` confirms the row exists, which is exactly the enumeration oracle the
@@ -160,6 +177,14 @@ there is no `getTask(id)` to call by mistake, so the unscoped query is not
 expressible. RLS is the independent backstop beneath it, and the composite
 foreign keys make a cross-owner *link* unrepresentable rather than merely
 unauthorized.
+
+**A malformed id gets the same 404.** `GET /api/tasks/abc` used to reach
+Postgres, raise `22P02 invalid input syntax for type uuid`, and surface as a
+**500** on eight endpoints. It is now 404 — and deliberately **not** 422, since
+a 422 would reveal that an id was at least well-formed, which is the
+enumeration oracle in miniature. Malformed, foreign and nonexistent ids are all
+answered identically. The check lives in the repository, not in each route, so
+a new route cannot forget it.
 
 ### Owner-safe relationships
 
@@ -241,7 +266,7 @@ control that shows the unlocked path corrupting the graph.
 npm test
 ```
 
-91 tests against real PostgreSQL 17.11. No mocks and no in-memory substitute:
+94 tests against real PostgreSQL 17.11. No mocks and no in-memory substitute:
 every guarantee in this release is a database guarantee, and a mock cannot
 evidence one. Auth tests go through the real library against the real database
 — no hand-inserted session rows, because a hand-made session would prove
@@ -276,6 +301,16 @@ The HTTP surface is deliberately the minimum that lets account isolation be
 | `/api/tasks/:id/dependencies` (POST) | DELETE an edge |
 | — | every `/api/plan*`, `/api/recurrence*` endpoint |
 | — | the `?view=inbox\|today\|upcoming\|project` query shapes |
+
+### Correctness behaviour NOT verified
+
+- **Calendar dates are verified at two offsets only** — UTC/Edmonton (negative)
+  and Auckland/Berlin (positive). No test runs at a **half-hour** offset
+  (`Asia/Kolkata`) or across a DST boundary *in the serialisation layer*;
+  NEXT-1's storage-level DST tests are separate and still pass.
+- **Malformed-id handling is verified on the seven id-bearing endpoints that
+  exist.** Phase 2's endpoints inherit the repository guard automatically, but
+  inheriting it is not the same as testing it.
 
 ### Security behaviour NOT verified
 
