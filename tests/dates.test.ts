@@ -99,3 +99,47 @@ test("R12: audit instants round-trip exactly as UTC", async () => {
 
   assert.equal(back, instant, "a timestamptz must survive a round trip to the exact millisecond");
 });
+
+test("AT-31: changing a user's timezone rewrites no stored date", async () => {
+  const u = await makeUser("America/Edmonton");
+  const t = await makeTask(u.id, { deadline: "2026-10-15" });
+  await superPool.query(
+    `INSERT INTO day_plans (user_id, plan_date, status, accepted_at)
+     VALUES ($1,'2026-10-15','accepted', now())`, [u.id]);
+
+  const snapshot = async () => {
+    const { rows } = await superPool.query<{ deadline: string; plan_date: string }>(
+      `SELECT to_char(t.deadline,'YYYY-MM-DD') AS deadline,
+              to_char(p.plan_date,'YYYY-MM-DD') AS plan_date
+         FROM tasks t, day_plans p
+        WHERE t.id = $1 AND p.user_id = $2`, [t, u.id]);
+    return rows[0]!;
+  };
+
+  const before = await snapshot();
+  await superPool.query("UPDATE users SET timezone='Asia/Kolkata' WHERE id=$1", [u.id]);
+  assert.deepEqual(await snapshot(), before,
+    "a timezone change must not rewrite any stored calendar date");
+  assert.equal(before.deadline, "2026-10-15");
+});
+
+test("AT-29: 'today' derives correctly for half-hour and southern-DST zones", async () => {
+  const zones = ["Asia/Kolkata", "Australia/Sydney", "America/Edmonton", "Pacific/Auckland"];
+  const users = await Promise.all(zones.map((z) => makeUser(z)));
+
+  const days = await Promise.all(users.map((u, i) =>
+    withUser(u.id, (c) => todayFor(c, u.id), runtimePool)
+      .then((d) => [zones[i]!, d] as const)));
+
+  for (const [zone, day] of days) {
+    assert.match(day, /^\d{4}-\d{2}-\d{2}$/, `${zone} must yield a calendar date`);
+    // Cross-check against Postgres computing the same thing independently.
+    const { rows } = await superPool.query<{ d: string }>(
+      "SELECT to_char((now() AT TIME ZONE $1)::date,'YYYY-MM-DD') AS d", [zone]);
+    assert.equal(day, rows[0]!.d, `${zone} date must match a direct server computation`);
+  }
+
+  // Kolkata is UTC+05:30 — a half-hour offset, which a naive offset-integer
+  // model gets wrong. Sydney is on southern-hemisphere DST, inverted from the north.
+  assert.equal(days.length, 4);
+});

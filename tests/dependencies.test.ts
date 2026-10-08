@@ -162,3 +162,33 @@ test("R7 control: WITHOUT the advisory lock the same race corrupts the graph", a
   assert.equal(await cycleExists(u.id), true,
     "the unlocked path creates a real cycle, which is exactly what the lock prevents");
 });
+
+test("AT-18: a rejected cycle names the offending path", async () => {
+  const u = await makeUser();
+  const [a, b, c3] = [await makeTask(u.id), await makeTask(u.id), await makeTask(u.id)];
+  await withUser(u.id, (c) => addDependency(c, u.id, a, b), runtimePool);
+  await withUser(u.id, (c) => addDependency(c, u.id, b, c3), runtimePool);
+
+  const err = await withUser(u.id, async (c) => {
+    try {
+      await addDependency(c, u.id, c3, a);
+      return null;
+    } catch (e) { return e as DependencyCycleError; }
+  }, runtimePool).catch((e) => e as DependencyCycleError);
+
+  assert.ok(err instanceof DependencyCycleError);
+  // c3 -> a -> b -> c3 : the chain closes back on the task being edited.
+  assert.deepEqual(err.path, [c3, a, b, c3], "the full cycle must be reported, in order");
+  assert.match(err.message, /would create a cycle: /);
+});
+
+test("AT-21: self-dependency reports a path too", async () => {
+  const u = await makeUser();
+  const a = await makeTask(u.id);
+  const err = await withUser(u.id, async (c) => {
+    try { await addDependency(c, u.id, a, a); return null; }
+    catch (e) { return e as DependencyCycleError; }
+  }, runtimePool);
+  assert.ok(err instanceof DependencyCycleError);
+  assert.deepEqual(err!.path, [a, a]);
+});

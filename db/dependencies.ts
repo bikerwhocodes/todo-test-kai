@@ -1,9 +1,52 @@
 import type pg from "pg";
 
+/**
+ * Builds the offending chain for an error message, and ONLY for that.
+ *
+ * Path tracking needs UNION ALL plus a "not already in this path" guard, which
+ * explores simple paths rather than deduplicating on id — worst case
+ * exponential on a dense graph. The cheap REACHES_SQL above stays the gate, so
+ * this runs only on the rare rejection path, against a graph already known to
+ * be small enough to have produced a cycle.
+ *
+ * ponytail: unbounded simple-path search on the error path only; add a node
+ * budget here if a real user ever builds a dependency graph dense enough to
+ * notice.
+ */
+async function cyclePath(
+  client: pg.PoolClient,
+  userId: string,
+  taskId: string,
+  dependsOnId: string,
+): Promise<string[]> {
+  const { rows } = await client.query<{ path: string[] }>(`
+    WITH RECURSIVE walk(id, path) AS (
+        SELECT depends_on_id, ARRAY[task_id, depends_on_id]
+          FROM task_dependencies
+         WHERE user_id = $1 AND task_id = $2
+      UNION ALL
+        SELECT d.depends_on_id, w.path || d.depends_on_id
+          FROM task_dependencies d
+          JOIN walk w ON d.task_id = w.id
+         WHERE d.user_id = $1
+           AND NOT d.depends_on_id = ANY (w.path)
+    )
+    SELECT path FROM walk WHERE id = $3 LIMIT 1`, [userId, dependsOnId, taskId]);
+
+  const found = rows[0]?.path;
+  // The new edge closes the loop: taskId -> dependsOnId -> ... -> taskId.
+  return found ? [taskId, ...found] : [taskId, dependsOnId];
+}
+
 export class DependencyCycleError extends Error {
-  constructor(taskId: string, dependsOnId: string) {
-    super(`dependency ${taskId} -> ${dependsOnId} would create a cycle`);
+  /** The offending chain, from the task being edited back round to itself. */
+  readonly path: string[];
+
+  constructor(taskId: string, dependsOnId: string, path: string[] = []) {
+    const chain = path.length > 0 ? path.join(" -> ") : `${taskId} -> ${dependsOnId}`;
+    super(`dependency ${taskId} -> ${dependsOnId} would create a cycle: ${chain}`);
     this.name = "DependencyCycleError";
+    this.path = path;
   }
 }
 
@@ -46,14 +89,18 @@ export async function addDependency(
   taskId: string,
   dependsOnId: string,
 ): Promise<void> {
-  if (taskId === dependsOnId) throw new DependencyCycleError(taskId, dependsOnId);
+  if (taskId === dependsOnId) {
+    throw new DependencyCycleError(taskId, dependsOnId, [taskId, taskId]);
+  }
 
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [userId]);
 
   const { rows } = await client.query<{ creates_cycle: boolean }>(REACHES_SQL, [
     userId, dependsOnId, taskId,
   ]);
-  if (rows[0]?.creates_cycle) throw new DependencyCycleError(taskId, dependsOnId);
+  if (rows[0]?.creates_cycle) {
+    throw new DependencyCycleError(taskId, dependsOnId, await cyclePath(client, userId, taskId, dependsOnId));
+  }
 
   await client.query(
     `INSERT INTO task_dependencies (user_id, task_id, depends_on_id)
