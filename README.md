@@ -3,12 +3,13 @@
 A private, web-based task planner that helps freelancers and solo developers
 choose a realistic, explainable daily plan.
 
-> **Release 1.0.0 — account and data foundation.**
+> **Release 1.0.0 — account and data foundation, plus accounts and isolation.**
 > This release delivers **no planning features**. There is no scheduler, no
 > Inbox/Today/Upcoming view and no suggestion explanation. What it does deliver
 > is the durable, private, owner-safe PostgreSQL foundation those features will
-> stand on, with every structural guarantee covered by tests that run against a
-> real database. Planning arrives in a later release.
+> stand on, and working **sign-up, sign-in and sign-out** on top of it, with
+> every structural guarantee covered by tests that run against a real database.
+> Planning arrives in a later release.
 
 ## Requirements
 
@@ -44,11 +45,19 @@ Confirm it worked:
 
 ```sh
 curl -s http://127.0.0.1:3100/api/health
-# {"ok":true,"postgres":"17.11 (...)","migrationsApplied":3,
-#  "role":"nextup_runtime","roleSafe":true}
+# {"ok":true,"postgres":"17.11 (...)","migrationsApplied":4,
+#  "role":"nextup_runtime","roleSafe":true,"schemaSafe":true}
 ```
 
-`roleSafe: true` is the important field — see *Two database roles* below.
+`roleSafe` and `schemaSafe` are the important fields — see *Three database
+roles* below. The server also refuses to start at all if either is false
+(`instrumentation.ts`), so a deployment pointed at an unsafe role crashes
+instead of quietly serving everyone's data.
+
+If you already had a `.env.local` from an earlier checkout, `npm run env:init`
+**adds** the variables this release introduced (`AUTH_DATABASE_URL`,
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `NEXTUP_AUTH_PASSWORD`) without
+touching the passwords already in it.
 
 ## Everyday commands
 
@@ -64,12 +73,34 @@ curl -s http://127.0.0.1:3100/api/health
 
 ## How this is put together
 
-### Two database roles
+### Three database roles
 
-| Role | Owns tables | Used by | Superuser / BYPASSRLS |
-|---|---|---|---|
-| `nextup_owner` | yes | migrations only | no |
-| `nextup_runtime` | **no** | the application | **no** |
+| Role | Owns tables | Used by | Reaches | Superuser / BYPASSRLS |
+|---|---|---|---|---|
+| `nextup_owner` | yes | migrations only | everything | no |
+| `nextup_runtime` | **no** | every ordinary request | the 6 domain tables + its **own** `users` row | **no** |
+| `nextup_auth` | **no** | `lib/auth.ts` only | the 4 identity tables + `rate_limits` | **no** |
+
+**Neither application role is a superset of the other.** The runtime role
+cannot read a single session token; the auth role cannot read a single task.
+That is the whole point: a flaw in either layer reaches strictly less than the
+whole, and `db/guard.ts` asserts **both** directions at startup, so a later
+migration that widens either one fails the boot rather than passing review.
+
+The auth role exists because Better Auth must look a user up by email and a
+session up by token **before a request has any identity**. An `app.user_id`
+policy cannot express that — with no identity set it denies every row, which is
+correct for domain data and fatal for login. The tempting fix is to grant the
+runtime role what the auth library needs; that was rejected, because it would
+give the code serving ordinary task requests permanent access to every user's
+row and every session token. See `db/migrations/004_auth_role.sql`.
+
+`users` is where the two roles meet, and the policies are asymmetric by role:
+`users_self` confines the runtime role to its own row, while `users_auth`
+(scoped `TO nextup_auth`) permits the pre-identity lookup. Permissive policies
+are OR'd and a `TO` clause limits which roles see a policy at all, so adding
+the second one widens nothing for the first. `tests/auth-role.test.ts` observes
+that asymmetry rather than assuming it.
 
 This split is load-bearing rather than tidy-minded. `ENABLE ROW LEVEL SECURITY`
 does **not** constrain a table's owner: with `ENABLE` alone, the owner sees
@@ -95,6 +126,40 @@ The policies read identity through `nullif(current_setting('app.user_id', true),
 The `nullif` matters: unset, `current_setting` returns an **empty string**, and
 casting `''` to `uuid` *raises* rather than denying — turning a missing identity
 into a 500 instead of an empty result. Wrapped, the policy fails closed.
+
+### Accounts and sessions
+
+Email + password through **Better Auth 1.7.7**, configured against the schema
+rather than generating its own: the adapter is handed an explicit
+singular-to-plural model map, so nothing depends on the adapter's `usePlural`
+string munging and a renamed table fails to typecheck instead of failing at the
+first sign-in.
+
+| Control | What runs |
+|---|---|
+| Password hashing | Better Auth's built-in **scrypt** (`node:crypto`). PRD A9 *proposed* Argon2id; what actually runs is scrypt, by decision, and a test asserts the stored form so this claim is checked rather than assumed. |
+| Sessions | Rows in `sessions`. Logout **deletes the row**, so a replayed cookie is dead even though it is still a valid signature. Expiry is enforced server-side from the row. |
+| Cookies | `HttpOnly`, `SameSite=Lax`, and `Secure` whenever `NODE_ENV=production`. |
+| CSRF | Origin checked against `trustedOrigins`; a cross-origin credential POST gets `403 INVALID_ORIGIN` and no session. |
+| Rate limiting | Enabled **explicitly** — the library default is off in development, which would have made the rate-limit test pass against no limiter. Counters live in `rate_limits` (Postgres), not process memory, because in-memory state is per-instance and therefore not a limit behind more than one server. Credential endpoints get 5/minute against the general 100/minute. |
+| Password reset | **Not implemented**, by conscious decision. A forgotten password is a lost account in this release. |
+
+Account creation belongs to the auth role: the runtime role has **no `INSERT`
+on `users`**, so the application cannot mint accounts outside the auth path.
+
+### Another user's id returns 404, never 403
+
+A `403` confirms the row exists, which is exactly the enumeration oracle the
+isolation design exists to deny. "Missing" and "not yours" are therefore the
+same answer, produced by one helper (`lib/http.ts`) so they cannot drift apart
+as endpoints are added. There is **no 403 anywhere in this API**, and a test
+asserts the forbidden and nonexistent responses are byte-identical.
+
+Every repository function takes the caller's user id alongside the row id —
+there is no `getTask(id)` to call by mistake, so the unscoped query is not
+expressible. RLS is the independent backstop beneath it, and the composite
+foreign keys make a cross-owner *link* unrepresentable rather than merely
+unauthorized.
 
 ### Owner-safe relationships
 
@@ -176,9 +241,11 @@ control that shows the unlocked path corrupting the graph.
 npm test
 ```
 
-54 tests against real PostgreSQL 17.11. No mocks and no in-memory substitute:
+91 tests against real PostgreSQL 17.11. No mocks and no in-memory substitute:
 every guarantee in this release is a database guarantee, and a mock cannot
-evidence one.
+evidence one. Auth tests go through the real library against the real database
+— no hand-inserted session rows, because a hand-made session would prove
+nothing about Better Auth.
 
 Isolation tests connect as **`nextup_runtime`**, the role the application
 actually uses. A privilege test that passes as the owner or the superuser is
@@ -192,15 +259,39 @@ Inbox/Today/Upcoming/Projects views · no deployment or hosting · no
 collaboration · no billing · no native apps · no external calendar integration
 · no natural-language date parsing.
 
-Sign-up, sign-in and sign-out are **not implemented here**. The identity tables
-(`users`, `sessions`, `accounts`, `verifications`) are migrated in this release
-in Better Auth's expected shape — with UUID ids and `timestamptz` instants
-rather than the library's `text`/naive-timestamp defaults — so that wiring the
-library is configuration rather than a schema rebuild. **Better Auth is
-installed but not wired up, and nothing here has been exercised through it.**
+Sign-up, sign-in and sign-out **do** work now, and so does two-account
+isolation across every endpoint below. What is still missing on the account
+side is deliberate: **no password reset, no email verification, no MFA, no
+account deletion or export, and no audit trail of data changes.** A forgotten
+password is a lost account in this release.
 
-The runtime role holds **no privileges on `sessions`, `accounts` or
-`verifications`**. Those tables are read before a request has any identity
-(looking a user up by email, a session up by token), which an `app.user_id`
-policy cannot express. Protecting them needs a separate auth role, and that
-belongs with the work that actually wires the auth library.
+The HTTP surface is deliberately the minimum that lets account isolation be
+*proven* end to end, not the full API:
+
+| Implemented | Still to come |
+|---|---|
+| `/api/auth/*`, `/api/me` | — |
+| `/api/projects`, `/api/projects/:id` | archive/unarchive, open counts |
+| `/api/tasks`, `/api/tasks/:id` | complete/reopen, subtask listing, search and filter |
+| `/api/tasks/:id/dependencies` (POST) | DELETE an edge |
+| — | every `/api/plan*`, `/api/recurrence*` endpoint |
+| — | the `?view=inbox\|today\|upcoming\|project` query shapes |
+
+### Security behaviour NOT verified
+
+Stated plainly, because an unverified control that is *assumed* to work is
+worse than a missing one:
+
+- **No rollback path for migrations.** Forward-only and append-only; there is
+  no `down` script and none is faked.
+- **`Secure` cookie flag under a real HTTPS origin.** Verified only that
+  `next start` (`NODE_ENV=production`) emits `Secure` over plain HTTP on
+  localhost. No TLS deployment exists to test against.
+- **Rate limiting under concurrency, and its IP attribution behind a proxy.**
+  Verified sequentially on a single host. When no client IP can be resolved,
+  Better Auth buckets requests under a single `no-trusted-ip` key — behind a
+  load balancer that would need `advanced.ipAddress.ipAddressHeaders` set, and
+  that is untested here.
+- **Session fixation across a privilege change**, concurrent logout races, and
+  cookie behaviour across subdomains.
+- **No load testing, no penetration testing, and no deployment of any kind.**

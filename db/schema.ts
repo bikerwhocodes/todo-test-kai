@@ -6,7 +6,7 @@
 // table and column names, so the two cannot drift apart unnoticed.
 import { sql } from "drizzle-orm";
 import {
-  boolean, check, date, foreignKey, index, integer, pgTable, smallint,
+  bigint, boolean, check, date, foreignKey, index, integer, pgTable, smallint,
   text, timestamp, unique, uniqueIndex, uuid,
 } from "drizzle-orm/pg-core";
 
@@ -62,6 +62,16 @@ export const verifications = pgTable("verifications", {
   createdAt,
   updatedAt,
 }, (t) => [index("verifications_identifier_idx").on(t.identifier)]);
+
+// Better Auth's rate-limit store (A9). Keyed by IP and path, written before
+// any identity exists, so it is not user-scoped and carries no RLS policy —
+// only the auth role is granted anything on it (004_auth_role.sql).
+export const rateLimits = pgTable("rate_limits", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull(),
+  lastRequest: bigint("last_request", { mode: "number" }).notNull(),
+});
 
 export const projects = pgTable("projects", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
