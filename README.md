@@ -62,7 +62,7 @@ Confirm it worked:
 
 ```sh
 curl -s http://127.0.0.1:3100/api/health
-# {"ok":true,"postgres":"17.11 (...)","migrationsApplied":4,
+# {"ok":true,"postgres":"17.11 (...)","migrationsApplied":5,
 #  "role":"nextup_runtime","roleSafe":true}
 ```
 
@@ -223,6 +223,17 @@ ON CONFLICT (recurrence_rule_id, occurrence_date)
 Omit the `WHERE` and it fails at runtime on the first call. A test asserts the
 omitted form still fails, so the correction cannot quietly regress.
 
+**`updated_at` is maintained by a trigger, not by application code.**
+`005_maintain_updated_at.sql` puts a `BEFORE UPDATE` trigger on every table
+that declares the column. Setting it in each repository function is how it came
+to be missing in the first place — one call site forgetting is invisible until
+someone reads a timestamp and believes it. The trigger fires only
+`WHEN (OLD.* IS DISTINCT FROM NEW.*)`, so `updated_at` means "last actually
+changed" rather than "last written to", and `UPDATE ... SET title = title`
+correctly registers as nothing. A test asserts that *every* table with the
+column has the trigger, because the realistic regression is a new table
+arriving without one — exactly how this happened.
+
 **Cycle detection carries no depth bound.** `db/dependencies.ts` deduplicates on
 `id` alone. Adding a `depth` column would reintroduce a cutoff — a `depth < 64`
 variant reports "no cycle" for a real cycle on a 70-link chain, admitting the
@@ -237,7 +248,7 @@ control that shows the unlocked path corrupting the graph.
 npm test
 ```
 
-83 tests against real PostgreSQL 17.11. No mocks and no in-memory substitute:
+88 tests against real PostgreSQL 17.11. No mocks and no in-memory substitute:
 every guarantee here is a database or an auth guarantee, and a mock cannot
 evidence one.
 
@@ -257,9 +268,21 @@ therefore unverified.
 The suite was mutation-tested rather than only observed passing. Returning 403
 instead of 404 fails three tests; granting the runtime role `SELECT` on
 `sessions` fails one; sourcing identity from anything but the signed cookie
-fails twelve. Two gaps that exercise found are now closed by tests of their
-own: a forged or tampered session cookie, and the row-level-security backstop
-holding when a repository forgets its `AND user_id` predicate.
+fails twelve; dropping the `updated_at` trigger fails three. Three gaps that
+exercise found are now closed by tests of their own: a forged or tampered
+session cookie, the row-level-security backstop holding when a repository
+forgets its `AND user_id` predicate, and the one below.
+
+**One of these tests was found to be checking nothing.** An independent review
+probe showed that `updated_at` never advanced — five tables declared it and
+nothing maintained it — which made `plan-separation.test.ts`'s *"every task's
+deadline and `updated_at` is untouched by the entire plan lifecycle"* vacuous
+on its `updated_at` half. A column that never moves is trivially untouched, so
+the test certified a guarantee (release criterion **R8** / AT-1-F(c)) it was
+not actually checking. Fixed by `005_maintain_updated_at.sql`;
+`tests/updated-at.test.ts` now carries the control that proves the assertion
+*can* fail. **83 passing tests did not catch this**, which is the argument for
+both mutation testing and outside review.
 
 ## Not built yet
 
