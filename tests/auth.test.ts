@@ -1,12 +1,42 @@
 // A9 / AT-33-37 — sessions, logout, expiry, CSRF, rate limiting and password
 // handling, exercised through Better Auth against the real database.
-import { test } from "node:test";
+import { before, test } from "node:test";
 import assert from "node:assert/strict";
 import { auth } from "../lib/auth.ts";
 import { superPool } from "./helpers.ts";
 import { ORIGIN, expireSession, signIn, sessionCookie, signUp } from "./auth-helpers.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Rate-limit counters are PERSISTED (`storage: "database"`) over a 60-second
+ * window, so they outlive the test process. Two suite runs inside one minute
+ * share the same buckets and the second starts partway through the budget —
+ * which made the same-origin control test below fail on the third consecutive
+ * run. That is the worst kind of CI failure: intermittent, and dependent on
+ * how recently the suite last ran rather than on the code.
+ *
+ * Reproduced before fixing: runs 1 and 2 passed 9/9, run 3 failed with
+ * `no-trusted-ip|/sign-in/email` at the 5-per-minute cap.
+ *
+ * Two fixes, because either alone is insufficient:
+ *   1. clear the store here, so a run never inherits a previous run's budget;
+ *   2. give each handler-driven test its OWN synthetic client ip (below), so
+ *      tests cannot starve each other within a single run either.
+ *
+ * General rule: any test touching a store the application persists across runs
+ * needs an explicit reset, not an assumption that the window has passed.
+ */
+before(async () => {
+  await superPool.query("DELETE FROM rate_limits");
+});
+
+/**
+ * Better Auth keys rate limits as `${ip}|${path}` and reads the ip from
+ * `x-forwarded-for`. Distinct ips per test keep the 5/minute credential rule
+ * from making one test's traffic another test's failure.
+ */
+const ip = (addr: string): Record<string, string> => ({ "x-forwarded-for": addr });
 
 test("A4: signup stores a UUID id, not the library's default base62 string", async () => {
   const a = await signUp();
@@ -86,7 +116,7 @@ test("A9: CSRF — a sign-in POST from a foreign origin is rejected", async () =
   const a = await signUp();
   const forged = new Request(new URL("/api/auth/sign-in/email", ORIGIN), {
     method: "POST",
-    headers: { "content-type": "application/json", origin: "https://evil.example" },
+    headers: { "content-type": "application/json", origin: "https://evil.example", ...ip("203.0.113.11") },
     body: JSON.stringify({ email: a.email, password: a.password }),
   });
   const res = await auth.handler(forged);
@@ -103,7 +133,7 @@ test("A9: a same-origin sign-in through the handler still works", async () => {
   const a = await signUp();
   const res = await auth.handler(new Request(new URL("/api/auth/sign-in/email", ORIGIN), {
     method: "POST",
-    headers: { "content-type": "application/json", origin: ORIGIN },
+    headers: { "content-type": "application/json", origin: ORIGIN, ...ip("203.0.113.12") },
     body: JSON.stringify({ email: a.email, password: a.password }),
   }));
   assert.equal(res.status, 200);
@@ -118,7 +148,7 @@ test("A9: rate limiting throttles repeated sign-in attempts", async () => {
   const attempt = () =>
     auth.handler(new Request(new URL("/api/auth/sign-in/email", ORIGIN), {
       method: "POST",
-      headers: { "content-type": "application/json", origin: ORIGIN, "x-forwarded-for": "203.0.113.7" },
+      headers: { "content-type": "application/json", origin: ORIGIN, ...ip("203.0.113.7") },
       body: JSON.stringify({ email: a.email, password: "definitely-wrong" }),
     }));
 
@@ -133,4 +163,14 @@ test("A9: rate limiting throttles repeated sign-in attempts", async () => {
   const { rows } = await superPool.query<{ n: string }>(
     "SELECT count(*)::text AS n FROM rate_limits");
   assert.notEqual(rows[0]?.n, "0", "storage: \"database\" must persist counters to rate_limits");
+
+  // And it must be a per-client limit, not a global kill switch: a DIFFERENT
+  // ip is unaffected by the exhausted one. Without this, a limiter that simply
+  // blocked everyone after 5 attempts would pass the assertion above.
+  const other = await auth.handler(new Request(new URL("/api/auth/sign-in/email", ORIGIN), {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: ORIGIN, ...ip("203.0.113.8") },
+    body: JSON.stringify({ email: a.email, password: a.password }),
+  }));
+  assert.equal(other.status, 200, "a different client must not inherit another's exhausted budget");
 });
