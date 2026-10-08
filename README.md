@@ -220,7 +220,10 @@ from it.
 `tasks` has no `plan_date` and no `planned_for_today` column. Membership of a
 day's plan exists **only** in `day_plan_items`, so planning a task for today
 structurally cannot change when it is actually due. A test walks a whole plan
-lifecycle and asserts no task's `deadline` or `updated_at` moves.
+lifecycle and asserts no task's `deadline` or `updated_at` moves. A paired
+test asserts a real task edit **does** move `updated_at`, so that comparison
+is checking something: without it, deleting `updated_at` maintenance
+altogether left every other test passing.
 
 ### Migrations are hand-written SQL
 
@@ -266,7 +269,7 @@ control that shows the unlocked path corrupting the graph.
 npm test
 ```
 
-94 tests against real PostgreSQL 17.11. No mocks and no in-memory substitute:
+95 tests against real PostgreSQL 17.11. No mocks and no in-memory substitute:
 every guarantee in this release is a database guarantee, and a mock cannot
 evidence one. Auth tests go through the real library against the real database
 — no hand-inserted session rows, because a hand-made session would prove
@@ -311,6 +314,12 @@ The HTTP surface is deliberately the minimum that lets account isolation be
 - **Malformed-id handling is verified on the seven id-bearing endpoints that
   exist.** Phase 2's endpoints inherit the repository guard automatically, but
   inheriting it is not the same as testing it.
+- **`updated_at` is maintained by the application, not by the database.**
+  `updateTask` sets it and a test now proves that; nothing stops a *future*
+  write path from forgetting it. A `BEFORE UPDATE` trigger would make it
+  unforgettable, which is the right fix once a second path to `tasks` exists.
+  Only `tasks` carries the column among domain tables; the identity tables'
+  copies are Better Auth's to maintain.
 
 ### Security behaviour NOT verified
 

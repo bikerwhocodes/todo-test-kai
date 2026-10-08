@@ -7,8 +7,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { withUser } from "../db/client.ts";
-import { expectFailure, makeProject, makeUser, runtimePool, superPool } from "./helpers.ts";
+import { expectFailure, makeProject, makeTask, makeUser, runtimePool, superPool } from "./helpers.ts";
 import { addDependency } from "../db/dependencies.ts";
+import { updateTask } from "../lib/repo.ts";
 
 type Fixture = {
   userId: string;
@@ -143,6 +144,34 @@ test("AT-1-F(c): no plan operation writes any task's deadline", async () => {
 
   assert.deepEqual(await snapshot(), before,
     "every task's deadline and updated_at is untouched by the entire plan lifecycle");
+});
+
+// The guard for the assertion above. AT-1-F(c) compares `updated_at` before and
+// after, which only carries information if SOMETHING can move it: if no code
+// path ever advanced the column, the comparison would hold for every possible
+// implementation and quietly certify a guarantee it was not checking.
+//
+// Verified the gap was real before adding this: deleting `updated_at = now()`
+// from updateTask left all 94 other tests passing.
+test("AT-1-F(c) is not vacuous: a real task edit DOES move updated_at", async () => {
+  const u = await makeUser();
+  const taskId = await makeTask(u.id, { title: "before" });
+
+  const readStamp = async (): Promise<string> => {
+    const { rows } = await superPool.query<{ updated_at: Date }>(
+      "SELECT updated_at FROM tasks WHERE id = $1", [taskId]);
+    return rows[0]!.updated_at.toISOString();
+  };
+
+  const before = await readStamp();
+  // now() is transaction start time, so a separate transaction is required for
+  // the clock to have moved at all.
+  await updateTask(u.id, taskId, { title: "after" });
+  const after = await readStamp();
+
+  assert.notEqual(after, before,
+    "updateTask must advance updated_at, otherwise AT-1-F(c) compares two constants");
+  assert.ok(after > before, `updated_at must move forward, not back (${before} -> ${after})`);
 });
 
 test("AT-1-F: at most one ACCEPTED plan per user per day; drafts unconstrained", async () => {
