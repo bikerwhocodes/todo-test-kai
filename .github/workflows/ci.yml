@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Deliberately the SAME commands the README documents, run against a
+      # clean checkout. If CI passes, the documented bootstrap works; if the
+      # README drifts from reality, this job is what catches it.
+      #
+      # Postgres runs via docker compose rather than a service container so the
+      # pinned 17.11 image and the restart-persistence test (R3) both exercise
+      # the real local path.
+      - name: Start PostgreSQL 17.11
+        run: npm run db:up
+
+      - name: Create roles and migrate
+        run: npm run db:setup
+
+      - name: Assert the runtime role cannot bypass RLS
+        run: npm run guard
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Fail if any credential was committed
+        run: |
+          if git ls-files | grep -E '^\.env(\.|$)' | grep -v '\.env\.example$'; then
+            echo "::error::an environment file other than .env.example is tracked"
+            exit 1
+          fi
+          # A connection string with a literal inline password. Template
+          # interpolations (${...}) are placeholders, not credentials.
+          if git ls-files -z | xargs -0 grep -InE 'postgres(ql)?://[^:]+:[^@/]+@' \
+               | grep -v '[$]{' | grep -vE '\.env\.example:|README\.md:|ci\.yml:'; then
+            echo "::error::a connection string with an inline password is committed"
+            exit 1
+          fi
+
+      - name: Database logs on failure
+        if: failure()
+        run: docker compose --env-file .env.local logs db | tail -100
+
+      - name: Tear down
+        if: always()
+        run: npm run db:down
