@@ -61,8 +61,18 @@ CREATE POLICY users_auth ON users
   USING      (true)
   WITH CHECK (true);
 
-GRANT SELECT, INSERT, UPDATE, DELETE
-  ON users, sessions, accounts, verifications, rate_limits
-  TO nextup_auth;
+-- Least privilege, and the one omission is deliberate: NO DELETE on `users`.
+-- Nothing in this release deletes an account — account deletion is explicitly
+-- out of MVP scope and `user.deleteUser` is not enabled — so the privilege
+-- would be dead weight on the one table that cascades to everything a person
+-- owns. Enabling account deletion later means granting it then, as a visible
+-- decision. The other four tables need DELETE: sessions on logout and expiry,
+-- verifications on consumption, rate_limits on window reset, accounts on
+-- credential changes.
+GRANT SELECT, INSERT, UPDATE         ON users         TO nextup_auth;
+GRANT SELECT, INSERT, UPDATE, DELETE ON sessions      TO nextup_auth;
+GRANT SELECT, INSERT, UPDATE, DELETE ON accounts      TO nextup_auth;
+GRANT SELECT, INSERT, UPDATE, DELETE ON verifications TO nextup_auth;
+GRANT SELECT, INSERT, UPDATE, DELETE ON rate_limits   TO nextup_auth;
 
 GRANT EXECUTE ON FUNCTION current_app_user() TO nextup_auth;

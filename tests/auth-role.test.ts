@@ -64,6 +64,15 @@ test("the runtime role has no INSERT on users; account creation belongs to the a
   const { rowCount } = await authPool.query(
     "INSERT INTO users (name, email) VALUES ($1, $2)", ["Auth Created", email]);
   assert.equal(rowCount, 1);
+
+  // But it cannot DELETE one. Nothing in this release deletes an account, so
+  // the privilege would be dead weight on the one table that cascades to
+  // everything a person owns. Asserted, not just omitted from the migration —
+  // otherwise a later GRANT would restore it silently.
+  const del = await expectFailure(() =>
+    authPool.query("DELETE FROM users WHERE email = $1", [email]));
+  assert.equal(del.code, "42501", "the auth role must not be able to delete an account");
+
   await superPool.query("DELETE FROM users WHERE email = $1", [email]);
 });
 
