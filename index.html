@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Todo</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem auto;
+        max-width: 24rem;
+      }
+      ul {
+        list-style: none;
+        margin: 1rem 0 0;
+        padding: 0;
+      }
+      li {
+        padding: 0.25rem 0;
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .done {
+        text-decoration: line-through;
+        color: #777;
+      }
+      #todo-footer {
+        margin: 0.5rem 0 0;
+        color: #555;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Todo</h1>
+
+    <form id="todo-form">
+      <label for="todo-input">New todo</label>
+      <input id="todo-input" name="text" autocomplete="off" />
+      <button type="submit">Add</button>
+    </form>
+
+    <ul id="todo-list"></ul>
+    <p id="todo-footer">0 items left</p>
+
+    <script src="todo.js"></script>
+    <script>
+      (function () {
+        'use strict';
+
+        var form = document.getElementById('todo-form');
+        var input = document.getElementById('todo-input');
+        var list = document.getElementById('todo-list');
+        var footer = document.getElementById('todo-footer');
+
+        function render() {
+          var items = Todo.list();
+
+          list.textContent = '';
+          items.forEach(function (item) {
+            var li = document.createElement('li');
+            var label = document.createElement('label');
+            var box = document.createElement('input');
+            var text = document.createElement('span');
+
+            box.type = 'checkbox';
+            box.checked = item.done;
+            box.dataset.id = String(item.id);
+
+            text.textContent = item.text;
+            if (item.done) {
+              text.className = 'done';
+            }
+
+            label.appendChild(box);
+            label.appendChild(text);
+            li.appendChild(label);
+            list.appendChild(li);
+          });
+
+          var left = items.filter(function (item) {
+            return !item.done;
+          }).length;
+          footer.textContent = left + ' items left';
+        }
+
+        form.addEventListener('submit', function (event) {
+          event.preventDefault();
+          try {
+            Todo.add(input.value);
+          } catch (error) {
+            return;
+          }
+          input.value = '';
+          render();
+        });
+
+        list.addEventListener('change', function (event) {
+          var box = event.target;
+          if (box.type !== 'checkbox') {
+            return;
+          }
+          Todo.complete(Number(box.dataset.id), box.checked);
+          render();
+        });
+
+        render();
+      })();
+    </script>
+  </body>
+</html>
