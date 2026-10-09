@@ -1,6 +1,6 @@
 // The one place a request becomes an identity.
-import { auth } from "./auth.ts";
-import { unauthenticated } from "./http.ts";
+import { AUTH_ORIGIN, auth } from "./auth.ts";
+import { invalidOrigin, unauthenticated } from "./http.ts";
 
 export type Session = { userId: string; email: string };
 
@@ -20,6 +20,10 @@ export async function getSession(req: Request): Promise<Session | null> {
  * querying with `undefined` as the owner.
  */
 export async function requireUser(req: Request): Promise<string> {
+  const origin = req.headers.get("origin");
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && origin && origin !== AUTH_ORIGIN) {
+    throw invalidOrigin();
+  }
   const s = await getSession(req);
   if (!s) throw unauthenticated();
   return s.userId;

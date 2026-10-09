@@ -11,7 +11,6 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const TARGET = ".env.local";
-const HOST = "127.0.0.1:55433";
 const pw = () => randomBytes(24).toString("base64url");
 
 const existing = existsSync(TARGET) ? readFileSync(TARGET, "utf8") : "";
@@ -21,6 +20,9 @@ const current = new Map(
     .filter((l) => l.trim() && !l.trimStart().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
 );
+const port = process.env.NEXTUP_DB_PORT || current.get("NEXTUP_DB_PORT") || "55433";
+const composeProject = process.env.COMPOSE_PROJECT_NAME || current.get("COMPOSE_PROJECT_NAME");
+const host = `127.0.0.1:${port}`;
 
 // Reuse any password already present; only generate what is absent.
 const secret = (name, make) => current.get(name) || make();
@@ -30,14 +32,16 @@ const runtimePw = secret("NEXTUP_RUNTIME_PASSWORD", pw);
 const authPw = secret("NEXTUP_AUTH_PASSWORD", pw);
 
 const wanted = {
+  NEXTUP_DB_PORT: port,
+  ...(composeProject ? { COMPOSE_PROJECT_NAME: composeProject } : {}),
   POSTGRES_PASSWORD: superPw,
   NEXTUP_OWNER_PASSWORD: ownerPw,
   NEXTUP_RUNTIME_PASSWORD: runtimePw,
   NEXTUP_AUTH_PASSWORD: authPw,
-  POSTGRES_SUPERUSER_URL: `postgresql://postgres:${superPw}@${HOST}/nextup`,
-  MIGRATION_DATABASE_URL: `postgresql://nextup_owner:${ownerPw}@${HOST}/nextup`,
-  DATABASE_URL: `postgresql://nextup_runtime:${runtimePw}@${HOST}/nextup`,
-  AUTH_DATABASE_URL: `postgresql://nextup_auth:${authPw}@${HOST}/nextup`,
+  POSTGRES_SUPERUSER_URL: `postgresql://postgres:${superPw}@${host}/nextup`,
+  MIGRATION_DATABASE_URL: `postgresql://nextup_owner:${ownerPw}@${host}/nextup`,
+  DATABASE_URL: `postgresql://nextup_runtime:${runtimePw}@${host}/nextup`,
+  AUTH_DATABASE_URL: `postgresql://nextup_auth:${authPw}@${host}/nextup`,
   BETTER_AUTH_SECRET: secret("BETTER_AUTH_SECRET", () => pw() + pw()),
   BETTER_AUTH_URL: "http://127.0.0.1:3100",
 };

@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { superPool } from "./helpers.ts";
-import { anonymous, authed, codeOf, params, signUpTwo } from "./auth-helpers.ts";
+import { anonymous, authed, codeOf, params, signUp, signUpTwo } from "./auth-helpers.ts";
 
 import { GET as listProjects, POST as createProject } from "../src/app/api/projects/route.ts";
 import {
@@ -124,6 +124,71 @@ test("AT-37: a cross-account rename 404s and does not rename", async () => {
   const { rows } = await superPool.query<{ name: string }>(
     "SELECT name FROM projects WHERE id = $1", [project.id]);
   assert.equal(rows[0]?.name, "A's project");
+});
+
+test("A9: hostile-origin unsafe methods cannot mutate stored data", async () => {
+  const account = await signUp();
+  const victimCreate = await createProject(authed("/api/projects", account, {
+    method: "POST", body: JSON.stringify({ name: "Victim" }),
+  }));
+  const victim = (await json(victimCreate)).project;
+  const controlCreate = await createProject(authed("/api/projects", account, {
+    method: "POST", body: JSON.stringify({ name: "Control" }),
+  }));
+  const control = (await json(controlCreate)).project;
+  const controlPatch = await patchProject(
+    authed(`/api/projects/${control.id}`, account, {
+      method: "PATCH", body: JSON.stringify({ name: "Control updated" }),
+    }),
+    params(control.id),
+  );
+  const controlDelete = await deleteProject(
+    authed(`/api/projects/${control.id}`, account, { method: "DELETE" }),
+    params(control.id),
+  );
+
+  const hostileOrigin = "https://evil.example.test";
+  const hostilePost = await createProject(authed("/api/projects", account, {
+    method: "POST",
+    headers: { origin: hostileOrigin, "content-type": "text/plain" },
+    body: JSON.stringify({ name: "Forged" }),
+  }));
+  const hostilePatch = await patchProject(
+    authed(`/api/projects/${victim.id}`, account, {
+      method: "PATCH",
+      headers: { origin: hostileOrigin, "content-type": "text/plain" },
+      body: JSON.stringify({ name: "Pwned" }),
+    }),
+    params(victim.id),
+  );
+  const hostileDelete = await deleteProject(
+    authed(`/api/projects/${victim.id}`, account, {
+      method: "DELETE", headers: { origin: hostileOrigin },
+    }),
+    params(victim.id),
+  );
+
+  const { rows: [state] } = await superPool.query<{
+    forged_count: number;
+    victim_count: number;
+    victim_name: string | null;
+    control_count: number;
+  }>(`SELECT
+        (SELECT count(*)::int FROM projects WHERE user_id = $1 AND name = 'Forged') AS forged_count,
+        (SELECT count(*)::int FROM projects WHERE id = $2) AS victim_count,
+        (SELECT name FROM projects WHERE id = $2) AS victim_name,
+        (SELECT count(*)::int FROM projects WHERE id = $3) AS control_count`,
+    [account.userId, victim.id, control.id]);
+
+  assert.deepEqual({
+    trusted: [victimCreate.status, controlCreate.status, controlPatch.status, controlDelete.status],
+    hostile: [hostilePost.status, hostilePatch.status, hostileDelete.status],
+    state,
+  }, {
+    trusted: [201, 201, 200, 204],
+    hostile: [403, 403, 403],
+    state: { forged_count: 0, victim_count: 1, victim_name: "Victim", control_count: 0 },
+  });
 });
 
 test("AT-37: B cannot LINK A's rows into B's own data", async () => {

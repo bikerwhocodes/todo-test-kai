@@ -2,6 +2,7 @@
 // handling, exercised through Better Auth against the real database.
 import { before, test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { auth } from "../lib/auth.ts";
 import { superPool } from "./helpers.ts";
 import { ORIGIN, expireSession, signIn, sessionCookie, signUp } from "./auth-helpers.ts";
@@ -44,6 +45,39 @@ test("A4: signup stores a UUID id, not the library's default base62 string", asy
   const { rows } = await superPool.query<{ id: string; pg_typeof: string }>(
     "SELECT id::text AS id, pg_typeof(id)::text AS pg_typeof FROM users WHERE id = $1", [a.userId]);
   assert.equal(rows[0]?.pg_typeof, "uuid", "the column itself must be uuid, not text");
+});
+
+test("A9: failed signup rolls back user, account, and session rows", async () => {
+  const email = `rollback-${randomUUID()}@example.test`;
+  await superPool.query("DROP TRIGGER IF EXISTS test_fail_signup_account ON accounts");
+  await superPool.query("DROP FUNCTION IF EXISTS test_fail_signup_account()");
+  await superPool.query(`CREATE FUNCTION test_fail_signup_account() RETURNS trigger
+    LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced account insert failure'; END $$`);
+  await superPool.query(`CREATE TRIGGER test_fail_signup_account BEFORE INSERT ON accounts
+    FOR EACH ROW EXECUTE FUNCTION test_fail_signup_account()`);
+
+  let status = 500;
+  let counts: { users: number; accounts: number; sessions: number } | undefined;
+  try {
+    status = (await auth.handler(new Request(new URL("/api/auth/sign-up/email", ORIGIN), {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: ORIGIN, ...ip("203.0.113.13") },
+      body: JSON.stringify({ name: "Rollback Test", email, password: `pw-${randomUUID()}` }),
+    }))).status;
+    const { rows } = await superPool.query<{ users: number; accounts: number; sessions: number }>(`SELECT
+      (SELECT count(*)::int FROM users WHERE email = $1) AS users,
+      (SELECT count(*)::int FROM accounts a JOIN users u ON u.id = a.user_id WHERE u.email = $1) AS accounts,
+      (SELECT count(*)::int FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.email = $1) AS sessions`,
+    [email]);
+    counts = rows[0];
+  } finally {
+    await superPool.query("DROP TRIGGER IF EXISTS test_fail_signup_account ON accounts");
+    await superPool.query("DROP FUNCTION IF EXISTS test_fail_signup_account()");
+    await superPool.query("DELETE FROM users WHERE email = $1", [email]);
+  }
+
+  assert.ok(status >= 400, `forced account failure must fail signup (got ${status})`);
+  assert.deepEqual(counts, { users: 0, accounts: 0, sessions: 0 });
 });
 
 test("A9: the stored credential is a scrypt hash, never the password", async () => {

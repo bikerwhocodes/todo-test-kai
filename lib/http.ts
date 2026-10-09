@@ -2,11 +2,12 @@
 //
 // A3: another user's resource must be INDISTINGUISHABLE from a missing one.
 // A 403 confirms the row exists, which is the enumeration oracle the whole
-// isolation design exists to deny. There is therefore no 403 in this API at
-// all, and `notFound()` is the single place both cases are answered, so they
-// cannot drift apart as endpoints are added.
+// isolation design exists to deny. Resource ownership therefore never emits
+// 403; `notFound()` is the single place both cases are answered. A request
+// rejected before lookup because its Origin is untrusted can safely use 403.
 export type ErrorCode =
   | "UNAUTHENTICATED"
+  | "INVALID_ORIGIN"
   | "NOT_FOUND"
   | "VALIDATION_FAILED"
   | "DEPENDENCY_CYCLE"
@@ -16,6 +17,7 @@ export type ErrorCode =
 
 const STATUS: Record<ErrorCode, number> = {
   UNAUTHENTICATED: 401,
+  INVALID_ORIGIN: 403,
   NOT_FOUND: 404,
   VALIDATION_FAILED: 422,
   DEPENDENCY_CYCLE: 409,
@@ -37,6 +39,9 @@ export class ApiError extends Error {
 
 export const unauthenticated = (): ApiError =>
   new ApiError("UNAUTHENTICATED", "Sign in to continue.");
+
+export const invalidOrigin = (): ApiError =>
+  new ApiError("INVALID_ORIGIN", "Origin is not allowed.");
 
 /**
  * Missing OR owned by someone else. Both say the same thing, on purpose (A3).

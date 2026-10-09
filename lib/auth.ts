@@ -26,6 +26,8 @@ const required = (name: string): string => {
   return v;
 };
 
+export const AUTH_ORIGIN = new URL(required("BETTER_AUTH_URL")).origin;
+
 let authPool: pg.Pool | undefined;
 
 /** The auth library's own pool. Separate role, separate blast radius. */
@@ -44,10 +46,11 @@ const isProduction = process.env.NODE_ENV === "production";
 export const auth = betterAuth({
   appName: "nextup",
   secret: required("BETTER_AUTH_SECRET"),
-  baseURL: required("BETTER_AUTH_URL"),
+  baseURL: AUTH_ORIGIN,
 
   database: drizzleAdapter(drizzle(getAuthPool()), {
     provider: "pg",
+    transaction: true,
     schema: {
       user: users,
       session: sessions,
@@ -98,7 +101,7 @@ export const auth = betterAuth({
   // CSRF: Better Auth checks the request Origin against this list. It defaults
   // to baseURL; naming it explicitly means adding a deployment origin is a
   // visible edit rather than a forgotten one.
-  trustedOrigins: [required("BETTER_AUTH_URL")],
+  trustedOrigins: [AUTH_ORIGIN],
 
   rateLimit: {
     // A9. Default-off in development is the trap here: left alone, the
