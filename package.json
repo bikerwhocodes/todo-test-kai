@@ -1,0 +1,41 @@
+{
+  "name": "nextup",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.16.0"
+  },
+  "scripts": {
+    "env:init": "node scripts/env-init.mjs",
+    "db:up": "npm run env:init && docker compose --env-file .env.local up -d --wait",
+    "db:down": "npm run env:init && docker compose --env-file .env.local down",
+    "db:reset": "npm run env:init && docker compose --env-file .env.local down -v && npm run db:up && npm run db:setup",
+    "db:setup": "node --env-file-if-exists=.env.local db/setup.ts",
+    "db:migrate": "node --env-file-if-exists=.env.local db/migrate.ts",
+    "db:psql": "docker compose --env-file .env.local exec db psql -U postgres -d nextup",
+    "guard": "node --env-file-if-exists=.env.local db/guard.ts",
+    "test": "node --env-file-if-exists=.env.local --test --test-concurrency=1 tests/*.test.ts",
+    "dev": "next dev -p 3100",
+    "build": "next build",
+    "start": "next start -p 3100",
+    "typecheck": "tsc --noEmit",
+    "db:restart": "docker compose --env-file .env.local restart db",
+    "test:tz": "TZ=Pacific/Auckland npm test"
+  },
+  "dependencies": {
+    "better-auth": "1.7.7",
+    "drizzle-orm": "0.45.4",
+    "next": "16.4.0",
+    "pg": "8.23.1",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.1.9",
+    "@types/react-dom": "19.1.7",
+    "typescript": "5.9.3"
+  }
+}

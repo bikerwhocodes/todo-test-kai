@@ -1,0 +1,13 @@
+-- 003_grant_migration_ledger.sql
+--
+-- The runtime role needs to read the migration ledger: /api/health reports how
+-- many migrations are applied, and without this grant that endpoint fails with
+-- "permission denied for table schema_migrations" at runtime.
+--
+-- Read-only, and the ledger holds no user data. The runtime role still cannot
+-- write to it, so it cannot forge or erase migration history.
+--
+-- This is a separate migration rather than an edit to 002 because migrations
+-- are append-only: 002 is already recorded as applied, so a change to its text
+-- would never run.
+GRANT SELECT ON schema_migrations TO nextup_runtime;
