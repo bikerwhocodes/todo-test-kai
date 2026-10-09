@@ -264,6 +264,24 @@ test("AT-37: B cannot LINK A's rows into B's own data", async () => {
   assert.deepEqual(aTasks.map((t: any) => t.id), [task.id]);
 });
 
+test("AT-33: a cookie-free unsafe request is unauthenticated, not a CSRF failure", async () => {
+  const res = await createProject(new Request(new URL("/api/projects", ORIGIN), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "Anonymous write" }),
+  }));
+  const code = await codeOf(res);
+  const { rows: [state] } = await superPool.query<{ count: number }>(
+    "SELECT count(*)::int AS count FROM projects WHERE name = 'Anonymous write'",
+  );
+
+  assert.deepEqual({ status: res.status, code, count: state?.count }, {
+    status: 401,
+    code: "UNAUTHENTICATED",
+    count: 0,
+  });
+});
+
 test("AT-33: every route refuses an unauthenticated request with 401", async () => {
   const { project, task } = await twoAccountsWithData();
   const id = task.id;

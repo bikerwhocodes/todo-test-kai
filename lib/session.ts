@@ -20,7 +20,7 @@ export async function getSession(req: Request): Promise<Session | null> {
  * querying with `undefined` as the owner.
  */
 export async function requireUser(req: Request): Promise<string> {
-  if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && req.headers.has("cookie")) {
     const provenance = req.headers.get("origin") ?? req.headers.get("referer");
     if (!provenance || !URL.canParse(provenance) || new URL(provenance).origin !== AUTH_ORIGIN) {
       throw invalidOrigin();
