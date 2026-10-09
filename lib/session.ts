@@ -20,9 +20,11 @@ export async function getSession(req: Request): Promise<Session | null> {
  * querying with `undefined` as the owner.
  */
 export async function requireUser(req: Request): Promise<string> {
-  const origin = req.headers.get("origin");
-  if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && origin && origin !== AUTH_ORIGIN) {
-    throw invalidOrigin();
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    const provenance = req.headers.get("origin") ?? req.headers.get("referer");
+    if (!provenance || !URL.canParse(provenance) || new URL(provenance).origin !== AUTH_ORIGIN) {
+      throw invalidOrigin();
+    }
   }
   const s = await getSession(req);
   if (!s) throw unauthenticated();

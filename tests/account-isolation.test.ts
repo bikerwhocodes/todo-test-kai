@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { superPool } from "./helpers.ts";
-import { anonymous, authed, codeOf, params, signUp, signUpTwo } from "./auth-helpers.ts";
+import { anonymous, authed, codeOf, ORIGIN, params, signUp, signUpTwo } from "./auth-helpers.ts";
 
 import { GET as listProjects, POST as createProject } from "../src/app/api/projects/route.ts";
 import {
@@ -188,6 +188,37 @@ test("A9: hostile-origin unsafe methods cannot mutate stored data", async () => 
     trusted: [201, 201, 200, 204],
     hostile: [403, 403, 403],
     state: { forged_count: 0, victim_count: 1, victim_name: "Victim", control_count: 0 },
+  });
+});
+
+test("A9: unsafe cookie requests require a trusted Origin or Referer", async () => {
+  const account = await signUp();
+  const attempt = (name: string, headers: Record<string, string> = {}) => createProject(
+    new Request(new URL("/api/projects", ORIGIN), {
+      method: "POST",
+      headers: { cookie: account.cookie, "content-type": "text/plain", ...headers },
+      body: JSON.stringify({ name }),
+    }),
+  );
+
+  const missing = await attempt("Missing provenance");
+  const hostileReferer = await attempt("Hostile referer", {
+    referer: "https://evil.example.test/forge",
+  });
+  const trustedReferer = await attempt("Trusted referer", {
+    referer: `${ORIGIN}/projects`,
+  });
+  const { rows } = await superPool.query<{ name: string }>(
+    "SELECT name FROM projects WHERE user_id = $1 ORDER BY name",
+    [account.userId],
+  );
+
+  assert.deepEqual({
+    statuses: [missing.status, hostileReferer.status, trustedReferer.status],
+    names: rows.map(({ name }) => name),
+  }, {
+    statuses: [403, 403, 201],
+    names: ["Trusted referer"],
   });
 });
 

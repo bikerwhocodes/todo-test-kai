@@ -1,12 +1,9 @@
 // Generates .env.local with locally-random passwords.
 //
-// Never overwrites a value that is already there — a regenerated password
-// would no longer match the one baked into the Postgres volume, which fails
-// later with a confusing "password authentication failed". But it DOES append
-// variables that are missing, so a checkout that predates a new variable
-// (e.g. AUTH_DATABASE_URL, added for the auth role) is brought up to date by
-// the same command the README already documents, instead of failing at
-// startup with "… is not set" and no obvious fix.
+// Never overwrites credentials or secrets that are already there — a
+// regenerated password would no longer match the one baked into the Postgres
+// volume. Explicit port/project overrides only update those settings and the
+// derived URLs. Missing variables are still appended for older checkouts.
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -46,9 +43,21 @@ const wanted = {
   BETTER_AUTH_URL: "http://127.0.0.1:3100",
 };
 
-const added = Object.keys(wanted).filter((k) => !current.has(k));
+const derivedUrls = [
+  "POSTGRES_SUPERUSER_URL",
+  "MIGRATION_DATABASE_URL",
+  "DATABASE_URL",
+  "AUTH_DATABASE_URL",
+];
+const overridden = new Set([
+  ...(process.env.NEXTUP_DB_PORT ? ["NEXTUP_DB_PORT", ...derivedUrls] : []),
+  ...(process.env.COMPOSE_PROJECT_NAME ? ["COMPOSE_PROJECT_NAME"] : []),
+]);
+const changed = Object.keys(wanted).filter(
+  (key) => !current.has(key) || (overridden.has(key) && current.get(key) !== wanted[key]),
+);
 
-if (existing && added.length === 0) {
+if (existing && changed.length === 0) {
   console.log(`${TARGET} is already complete — leaving it untouched.`);
   process.exit(0);
 }
@@ -62,11 +71,16 @@ if (!existing) {
   );
   console.log(`Wrote ${TARGET} with locally-generated passwords.`);
 } else {
-  const body = added.map((k) => `${k}=${wanted[k]}`).join("\n");
-  writeFileSync(
-    TARGET,
-    `${existing.endsWith("\n") ? existing : existing + "\n"}# Added by \`npm run env:init\`.\n${body}\n`,
-    { mode: 0o600 },
-  );
-  console.log(`Added ${added.length} missing variable(s) to ${TARGET}: ${added.join(", ")}`);
+  const replaced = changed.filter((key) => current.has(key));
+  const added = changed.filter((key) => !current.has(key));
+  let next = existing;
+  for (const key of replaced) {
+    next = next.replace(new RegExp(`^${key}=.*$`, "m"), `${key}=${wanted[key]}`);
+  }
+  if (added.length > 0) {
+    const body = added.map((key) => `${key}=${wanted[key]}`).join("\n");
+    next = `${next.endsWith("\n") ? next : next + "\n"}# Added by \`npm run env:init\`.\n${body}\n`;
+  }
+  writeFileSync(TARGET, next, { mode: 0o600 });
+  console.log(`Updated ${changed.length} variable(s) in ${TARGET}: ${changed.join(", ")}`);
 }
