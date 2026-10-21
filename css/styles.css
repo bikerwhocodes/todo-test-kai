@@ -1,0 +1,163 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --text: #1f2933;
+  --muted: #6b7280;
+  --border: #d9dde3;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --danger: #dc2626;
+  --radius: 8px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  padding: 3rem 1rem;
+}
+
+.app {
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.app__title {
+  margin: 0 0 1rem;
+  font-size: 1.75rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.new-task {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.new-task__input {
+  flex: 1;
+  padding: 0.6rem 0.75rem;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.new-task__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.new-task__button {
+  padding: 0.6rem 1rem;
+  font: inherit;
+  color: var(--accent-text);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.filters {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.filter {
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.filter[aria-pressed="true"] {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.filter__count {
+  opacity: 0.75;
+  font-size: 0.8rem;
+}
+
+.task-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.task__label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.task__toggle {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--accent);
+}
+
+.task__title {
+  overflow-wrap: anywhere;
+}
+
+.task--done .task__title {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.task__delete {
+  padding: 0 0.5rem;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.task__delete:hover,
+.task__delete:focus-visible {
+  color: var(--danger);
+}
+
+.empty {
+  margin: 1rem 0 0;
+  color: var(--muted);
+  text-align: center;
+}

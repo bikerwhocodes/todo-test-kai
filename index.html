@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Todo</title>
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <h1 class="app__title">Todo</h1>
+
+      <form id="new-task-form" class="new-task" autocomplete="off">
+        <label for="new-task-input" class="visually-hidden">New task</label>
+        <input
+          id="new-task-input"
+          class="new-task__input"
+          type="text"
+          placeholder="What needs doing?"
+          maxlength="200"
+          autofocus
+        />
+        <button type="submit" class="new-task__button">Add</button>
+      </form>
+
+      <nav class="filters" aria-label="Filter tasks">
+        <button type="button" class="filter" data-filter="all" aria-pressed="true">
+          All <span class="filter__count">0</span>
+        </button>
+        <button type="button" class="filter" data-filter="active" aria-pressed="false">
+          Active <span class="filter__count">0</span>
+        </button>
+        <button type="button" class="filter" data-filter="done" aria-pressed="false">
+          Done <span class="filter__count">0</span>
+        </button>
+      </nav>
+
+      <ul id="task-list" class="task-list" aria-live="polite"></ul>
+      <p id="empty-message" class="empty" hidden></p>
+    </main>
+
+    <script src="js/store.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
