@@ -4,9 +4,10 @@ import { localToday } from "@/core/dates";
 import { TaskGroup, toGroupItems } from "@/components/tasks/task-group";
 import { PlanSection } from "@/components/today/plan-section";
 import { listDueTasks } from "@/server/repo/agenda";
+import { getPlan } from "@/server/repo/plans";
 import { listProjects } from "@/server/repo/projects";
 import { occurrenceBadges } from "@/server/repo/series";
-import { listOpenTaskTitles, type TaskWithSubtasks } from "@/server/repo/tasks";
+import { listOpenTaskTitles } from "@/server/repo/tasks";
 import { getUserSettings } from "@/server/repo/user-settings";
 import { requireUser } from "@/server/session";
 
@@ -18,14 +19,14 @@ export default async function TodayPage() {
   const settings = await getUserSettings(user.id);
   const now = new Date();
   const today = localToday(settings.timeZone, now);
-  const [due, projects, taskOptions] = await Promise.all([
+  const [due, projects, taskOptions, plan] = await Promise.all([
     listDueTasks(user.id, today),
     listProjects(user.id),
     listOpenTaskTitles(user.id),
+    getPlan(user.id, today),
   ]);
-  // Plan My Day (M5) loads today's plan here. Until then it is empty, so every
-  // due task shows below; planned tasks are left out of the due section.
-  const planned: TaskWithSubtasks[] = [];
+  // Today's plan, in plan order; planned tasks are left out of the due section.
+  const planned = plan.items.map((i) => i.task);
   const unplannedDue = dueNotInPlan(due, today, planned.map((t) => t.id));
   const badges = await occurrenceBadges(user.id, [...planned, ...unplannedDue], today);
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));

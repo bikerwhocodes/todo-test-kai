@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_SEARCH_QUERY, type SearchQuery } from "@/core/search";
 import { db } from "@/server/db";
 import {
+  dayPlans,
+  planDismissals,
+  planItems,
   projects,
   recurringSeries,
   subtasks,
@@ -23,6 +26,16 @@ import {
   setProjectArchived,
 } from "@/server/repo/projects";
 import { listDueTasks, listUpcomingTasks } from "@/server/repo/agenda";
+import {
+  acceptSuggestions,
+  addPlanItem,
+  dismissSuggestion,
+  getPlan,
+  loadPlanInput,
+  removePlanItem,
+  reorderPlan,
+  suggest,
+} from "@/server/repo/plans";
 import { searchTasks } from "@/server/repo/search";
 import {
   createSeries,
@@ -330,6 +343,81 @@ describe("settings", () => {
   });
 });
 
+describe("day plans", () => {
+  /** Every plan row A owns, whole. */
+  const aPlanRows = async () => ({
+    plans: await db.select().from(dayPlans).where(eq(dayPlans.userId, a)),
+    items: await db.select().from(planItems).where(eq(planItems.userId, a)),
+    dismissals: await db.select().from(planDismissals).where(eq(planDismissals.userId, a)),
+  });
+  const bPlanRows = async () => [
+    ...(await db.select().from(dayPlans).where(eq(dayPlans.userId, b))),
+    ...(await db.select().from(planItems).where(eq(planItems.userId, b))),
+    ...(await db.select().from(planDismissals).where(eq(planDismissals.userId, b))),
+  ];
+
+  beforeEach(async () => {
+    // A planned aInboxTask yesterday and today, and dismissed aTask today.
+    await acceptSuggestions(a, "2026-10-21", { taskIds: [aInboxTask.id] });
+    await acceptSuggestions(a, TODAY, { taskIds: [aInboxTask.id], availableMin: 90 });
+    await dismissSuggestion(a, TODAY, aTask.id);
+  });
+
+  it("B cannot read A's plan, dismissals, carried-over tasks or suggestions", async () => {
+    expect(await getPlan(b, TODAY)).toEqual({ availableMin: null, items: [] });
+    expect(await loadPlanInput(b, TODAY)).toMatchObject({
+      tasks: [],
+      edges: [],
+      inPlanIds: [],
+      dismissedIds: [],
+      carriedOverIds: [],
+    });
+    const draft = await suggest(b, TODAY, 1440);
+    expect(draft.suggestions).toEqual([]);
+    expect(draft.excluded).toEqual([]);
+    expect(draft.totals).toMatchObject({ existingCount: 0, existingMin: 0 });
+
+    // Positive control: A sees all of it.
+    expect((await getPlan(a, TODAY)).items.map((i) => i.task.id)).toEqual([aInboxTask.id]);
+    expect(await loadPlanInput(a, TODAY)).toMatchObject({
+      inPlanIds: [aInboxTask.id],
+      dismissedIds: [aTask.id],
+      carriedOverIds: [aInboxTask.id],
+    });
+  });
+
+  it("B's plan holds none of A's tasks, and A's open blockers don't block B's tasks", async () => {
+    const bTask = await createTask(b, { title: "Bob's task" });
+    await acceptSuggestions(b, TODAY, { taskIds: [bTask.id] });
+    expect((await getPlan(b, TODAY)).items.map((i) => i.task.id)).toEqual([bTask.id]);
+    expect((await getPlan(b, TODAY)).items[0]!.task).toMatchObject({ subtasks: [], blockers: [] });
+    expect(ids((await suggest(b, "2026-10-23", 1440)).suggestions.map((s) => s.task))).toEqual([bTask.id]);
+  });
+
+  it("B cannot accept, add, remove, reorder or dismiss A's tasks, and nothing is saved", async () => {
+    const before = await aPlanRows();
+    const bTask = await createTask(b, { title: "Bob's task" });
+
+    const attempts: [string, () => Promise<unknown>][] = [
+      ["accept A's task", () => acceptSuggestions(b, TODAY, { taskIds: [aTask.id] })],
+      ["accept B's and A's", () => acceptSuggestions(b, TODAY, { taskIds: [bTask.id, aInboxTask.id], availableMin: 10 })],
+      ["add A's task", () => addPlanItem(b, TODAY, aTask.id)],
+      ["add A's planned task", () => addPlanItem(b, TODAY, aInboxTask.id)],
+      ["remove A's planned task", () => removePlanItem(b, TODAY, aInboxTask.id)],
+      ["reorder A's plan", () => reorderPlan(b, TODAY, [aInboxTask.id])],
+      ["dismiss A's task", () => dismissSuggestion(b, TODAY, aInboxTask.id)],
+      ["re-dismiss A's dismissed task", () => dismissSuggestion(b, TODAY, aTask.id)],
+    ];
+    for (const [name, run] of attempts) {
+      await expect(run(), name).rejects.toMatchObject({ name: "NotFoundError", entity: "task" });
+    }
+
+    expect(await aPlanRows()).toEqual(before);
+    // Refused writes leave no half-made plan behind for B either.
+    expect(await bPlanRows()).toEqual([]);
+  });
+});
+
 describe("database constraints", () => {
   it("refuse a task owned by B that points at A's project", async () => {
     await expectPgError(db.insert(tasks).values({ userId: b, title: "x", projectId: aProject.id }), FK_VIOLATION);
@@ -384,6 +472,46 @@ describe("database constraints", () => {
       db.update(taskDependencies).set({ userId: b }).where(eq(taskDependencies.userId, a)),
       FK_VIOLATION,
     );
+  });
+
+  it("refuse plan rows that join two users' plans and tasks, whoever owns the row", async () => {
+    const [aPlan] = await db.insert(dayPlans).values({ userId: a, planDate: TODAY }).returning();
+    const [bPlan] = await db.insert(dayPlans).values({ userId: b, planDate: TODAY }).returning();
+    const bTask = await createTask(b, { title: "Bob's task" });
+    const item = { position: 0, source: "manual" as const };
+    const cases = [
+      { userId: b, dayPlanId: aPlan!.id, taskId: bTask.id }, // B's row in A's plan
+      { userId: b, dayPlanId: bPlan!.id, taskId: aTask.id }, // A's task in B's plan
+      { userId: a, dayPlanId: bPlan!.id, taskId: aTask.id }, // A's row in B's plan
+      { userId: a, dayPlanId: aPlan!.id, taskId: bTask.id }, // B's task in A's plan
+    ];
+    for (const row of cases) await expectPgError(db.insert(planItems).values({ ...row, ...item }), FK_VIOLATION);
+
+    for (const row of [
+      { userId: b, planDate: TODAY, taskId: aTask.id },
+      { userId: a, planDate: TODAY, taskId: bTask.id },
+    ]) {
+      await expectPgError(db.insert(planDismissals).values(row), FK_VIOLATION);
+    }
+
+    // Moving A's existing rows to B, or repointing them at B's rows, is refused too.
+    await db.insert(planItems).values({ userId: a, dayPlanId: aPlan!.id, taskId: aTask.id, ...item });
+    await db.insert(planDismissals).values({ userId: a, planDate: TODAY, taskId: aTask.id });
+    await expectPgError(db.update(planItems).set({ userId: b }).where(eq(planItems.userId, a)), FK_VIOLATION);
+    await expectPgError(
+      db.update(planItems).set({ dayPlanId: bPlan!.id }).where(eq(planItems.userId, a)),
+      FK_VIOLATION,
+    );
+    await expectPgError(db.update(planItems).set({ taskId: bTask.id }).where(eq(planItems.userId, a)), FK_VIOLATION);
+    await expectPgError(db.update(planDismissals).set({ userId: b }).where(eq(planDismissals.userId, a)), FK_VIOLATION);
+  });
+
+  it("delete plan items and dismissals with their task", async () => {
+    await acceptSuggestions(a, TODAY, { taskIds: [aTask.id, aInboxTask.id] });
+    await dismissSuggestion(a, TODAY, aTask.id);
+    await deleteTask(a, aTask.id);
+    expect((await getPlan(a, TODAY)).items.map((i) => i.task.id)).toEqual([aInboxTask.id]);
+    expect(await db.select().from(planDismissals).where(eq(planDismissals.userId, a))).toEqual([]);
   });
 
   it("refuse a task that waits on itself", async () => {

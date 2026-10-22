@@ -158,3 +158,29 @@ export const updateSettingsInput = z
 
 export type UpdateSettingsInput = z.input<typeof updateSettingsInput>;
 export type SettingsPatch = z.output<typeof updateSettingsInput>;
+
+// Plan My Day (spec §4). No dates are sent: the server plans the user's local today.
+
+/** More items than anyone plans in a day; bounds the work one request can ask for. */
+const PLAN_MAX_ITEMS = 500;
+
+const availableMin = z
+  .number()
+  .int("Available time must be whole minutes")
+  .min(0, "Available time can't be negative")
+  .max(ESTIMATE_MAX_MIN, "Available time must be at most 24 hours");
+
+const planTaskIds = z.array(id).max(PLAN_MAX_ITEMS, `A plan holds at most ${PLAN_MAX_ITEMS} tasks`);
+
+export const suggestPlanInput = z.object({ availableMin });
+
+/** The suggestions the user kept, in their order; appended after the existing plan. */
+export const acceptPlanInput = z.object({ taskIds: planTaskIds, availableMin: availableMin.optional() });
+
+/** Add to, remove from, or dismiss a suggestion for today's plan. */
+export const planTaskInput = z.object({ taskId: id });
+
+/** Every task in today's plan, in the new order. */
+export const reorderPlanInput = z.object({ taskIds: planTaskIds });
+
+export type AcceptPlanInput = z.output<typeof acceptPlanInput>;

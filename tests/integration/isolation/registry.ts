@@ -1,4 +1,5 @@
 import type * as authActions from "@/server/actions/auth";
+import type * as planActions from "@/server/actions/plans";
 import type * as projectActions from "@/server/actions/projects";
 import type * as seriesActions from "@/server/actions/series";
 import type * as settingsActions from "@/server/actions/settings";
@@ -34,6 +35,9 @@ export const USER_OWNED_TABLES: Record<string, { ownerColumn: string }> = {
   tasks: { ownerColumn: "user_id" },
   subtasks: { ownerColumn: "user_id" },
   task_dependencies: { ownerColumn: "user_id" },
+  day_plans: { ownerColumn: "user_id" },
+  plan_items: { ownerColumn: "user_id" },
+  plan_dismissals: { ownerColumn: "user_id" },
 };
 
 /** Public tables that belong to no user, with the reason. */
@@ -49,6 +53,7 @@ export type ActionName =
   | keyof typeof taskActions
   | keyof typeof projectActions
   | keyof typeof seriesActions
+  | keyof typeof planActions
   | keyof typeof settingsActions
   | keyof typeof authActions;
 
@@ -326,6 +331,72 @@ export const ACTION_COVERAGE: Record<ActionName, ActionCoverage> = {
     ],
   },
 
+  // src/server/actions/plans.ts. Each works on B's own today; ownership is checked before
+  // anything else, so A's done, planned or dismissed tasks get the same answer as missing ones.
+  suggestPlanAction: {
+    exempt:
+      "Takes no resource id and saves nothing. actions.test.ts checks B's draft holds none of A's tasks, even with a smuggled userId.",
+  },
+  acceptPlanAction: {
+    cases: [
+      { name: "accept A's task into B's plan", input: (w) => ({ taskIds: [w.a.dueTask.id] }), error: "Task not found" },
+      {
+        name: "accept A's planned task, with available time",
+        input: (w) => ({ taskIds: [w.a.inboxTask.id], availableMin: 30 }),
+        error: "Task not found",
+      },
+      // A not-open task of one's own is a conflict; A's must be not-found.
+      { name: "accept A's completed task", input: (w) => ({ taskIds: [w.a.completedTask.id] }), error: "Task not found" },
+      {
+        name: "accept B's own task together with A's",
+        input: (w) => ({ taskIds: [w.b.dueTask.id, w.a.projectTask.id] }),
+        error: "Task not found",
+      },
+      {
+        name: "accept B's own planned task together with A's",
+        input: (w) => ({ taskIds: [w.b.inboxTask.id, w.a.occurrence.id] }),
+        error: "Task not found",
+      },
+    ],
+  },
+  addPlanItemAction: {
+    cases: [
+      { name: "add A's task to B's plan", input: (w) => ({ taskId: w.a.dueTask.id }), error: "Task not found" },
+      { name: "add A's planned task", input: (w) => ({ taskId: w.a.inboxTask.id }), error: "Task not found" },
+      // Adding undoes a dismissal; A's must stay.
+      { name: "add A's dismissed task", input: (w) => ({ taskId: w.a.upcomingTask.id }), error: "Task not found" },
+      { name: "add A's completed task", input: (w) => ({ taskId: w.a.completedTask.id }), error: "Task not found" },
+    ],
+  },
+  removePlanItemAction: {
+    cases: [
+      { name: "remove A's planned task", input: (w) => ({ taskId: w.a.inboxTask.id }), error: "Task not found" },
+      { name: "remove A's unplanned task", input: (w) => ({ taskId: w.a.dueTask.id }), error: "Task not found" },
+    ],
+  },
+  reorderPlanAction: {
+    cases: [
+      { name: "reorder with A's plan", input: (w) => ({ taskIds: [w.a.inboxTask.id] }), error: "Task not found" },
+      {
+        name: "reorder B's plan with A's task added",
+        input: (w) => ({ taskIds: [w.a.inboxTask.id, w.b.inboxTask.id] }),
+        error: "Task not found",
+      },
+      {
+        name: "reorder B's plan with A's task in place of B's",
+        input: (w) => ({ taskIds: [w.a.dueTask.id] }),
+        error: "Task not found",
+      },
+    ],
+  },
+  dismissSuggestionAction: {
+    cases: [
+      { name: "dismiss A's task", input: (w) => ({ taskId: w.a.dueTask.id }), error: "Task not found" },
+      { name: "re-dismiss A's dismissed task", input: (w) => ({ taskId: w.a.upcomingTask.id }), error: "Task not found" },
+      { name: "dismiss A's planned task", input: (w) => ({ taskId: w.a.inboxTask.id }), error: "Task not found" },
+    ],
+  },
+
   // src/server/actions/settings.ts
   updateSettingsAction: {
     exempt:
@@ -361,7 +432,7 @@ export const PAGE_COVERAGE = {
   "src/app/(auth)/login/page.tsx": { exempt: "Signed-out form; reads no data." },
   "src/app/(auth)/signup/page.tsx": { exempt: "Signed-out form; reads no data." },
   "src/app/(app)/layout.tsx": { cases: "Nav lists only the caller's projects and email." },
-  "src/app/(app)/today/page.tsx": { cases: "Shows the caller's own time zone and due tasks." },
+  "src/app/(app)/today/page.tsx": { cases: "Shows the caller's own time zone, plan and due tasks." },
   "src/app/(app)/upcoming/page.tsx": {
     cases: "Lists only the caller's tasks and occurrences with deadlines, grouped in the caller's zone.",
   },

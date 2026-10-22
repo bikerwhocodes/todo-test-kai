@@ -3,9 +3,15 @@ import { expect } from "vitest";
 import { db } from "@/server/db";
 import { addDays, localToday } from "@/core/dates";
 import {
+  dayPlans,
+  planDismissals,
+  planItems,
   session,
   taskDependencies,
   tasks,
+  type DayPlan,
+  type PlanDismissal,
+  type PlanItem,
   type Project,
   type RecurringSeries,
   type Subtask,
@@ -13,6 +19,7 @@ import {
   type TaskDependency,
 } from "@/server/db/schema";
 import { addBlocker } from "@/server/repo/dependencies";
+import { acceptSuggestions, dismissSuggestion } from "@/server/repo/plans";
 import { createProject, setProjectArchived } from "@/server/repo/projects";
 import { createSeries } from "@/server/repo/series";
 import { addSubtask } from "@/server/repo/subtasks";
@@ -47,6 +54,11 @@ export type Account = SignedUp & {
   series: RecurringSeries;
   occurrence: Task;
   completedOccurrence: Task;
+  /** Today's plan (in the account's zone) holding `inboxTask`, with 120 minutes available. */
+  dayPlan: DayPlan;
+  planItem: PlanItem;
+  /** `upcomingTask` dismissed from today's suggestions. */
+  dismissal: PlanDismissal;
 };
 
 export type World = { a: Account; b: Account };
@@ -116,6 +128,13 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
     .where(and(eq(tasks.userId, user.id), eq(tasks.seriesId, series.id), eq(tasks.status, "open")));
   if (!occurrence) throw new Error(`no open occurrence for ${slug}`);
 
+  await acceptSuggestions(user.id, today, { taskIds: [inboxTask.id], availableMin: 120 });
+  await dismissSuggestion(user.id, today, upcomingTask.id);
+  const [dayPlan] = await db.select().from(dayPlans).where(eq(dayPlans.userId, user.id));
+  const [planItem] = await db.select().from(planItems).where(eq(planItems.userId, user.id));
+  const [dismissal] = await db.select().from(planDismissals).where(eq(planDismissals.userId, user.id));
+  if (!dayPlan || !planItem || !dismissal) throw new Error(`no plan rows for ${slug}`);
+
   return {
     ...user,
     marker,
@@ -134,6 +153,9 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
     series,
     occurrence,
     completedOccurrence,
+    dayPlan,
+    planItem,
+    dismissal,
   };
 }
 
@@ -175,6 +197,8 @@ export function fingerprints(account: Account): string[] {
     account.series.id,
     account.occurrence.id,
     account.completedOccurrence.id,
+    account.dayPlan.id,
+    account.planItem.id,
   ];
 }
 

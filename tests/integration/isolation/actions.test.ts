@@ -10,6 +10,7 @@ vi.mock("next/cache", async () => (await import("../next-mocks")).nextCache);
 vi.mock("react", async (orig) => ({ ...(await orig<object>()), ...(await import("../next-mocks")).reactCache }));
 
 import * as authActions from "@/server/actions/auth";
+import * as planActions from "@/server/actions/plans";
 import * as projectActions from "@/server/actions/projects";
 import * as seriesActions from "@/server/actions/series";
 import * as settingsActions from "@/server/actions/settings";
@@ -17,7 +18,7 @@ import * as taskActions from "@/server/actions/tasks";
 import { requireUser } from "@/server/session";
 import { actAs, revalidatePath } from "../next-mocks";
 import { ACTION_COVERAGE, type ActionCase, type ActionName } from "./registry";
-import { seedWorld, snapshotOf, type World } from "./world";
+import { expectNoneOf, expectSomeOf, seedWorld, snapshotOf, type World } from "./world";
 
 // Signed in as B, every server action is called with A's ids. Each must answer exactly
 // "<Entity> not found" (the same as for an id that doesn't exist) and change nothing.
@@ -26,6 +27,7 @@ const actions: Record<ActionName, (input?: unknown) => Promise<unknown>> = {
   ...taskActions,
   ...projectActions,
   ...seriesActions,
+  ...planActions,
   ...settingsActions,
   ...authActions,
 };
@@ -82,6 +84,16 @@ describe("B calling actions with A's ids gets not-found and changes nothing", ()
     expect(await actions.skipOccurrenceAction({ id: missing })).toEqual(
       await actions.skipOccurrenceAction({ id: w.a.occurrence.id }),
     );
+    // A's completed task would be a conflict if it were B's.
+    expect(await actions.acceptPlanAction({ taskIds: [missing] })).toEqual(
+      await actions.acceptPlanAction({ taskIds: [w.a.completedTask.id] }),
+    );
+    expect(await actions.removePlanItemAction({ taskId: missing })).toEqual(
+      await actions.removePlanItemAction({ taskId: w.a.inboxTask.id }),
+    );
+    expect(await actions.reorderPlanAction({ taskIds: [missing] })).toEqual(
+      await actions.reorderPlanAction({ taskIds: [w.a.inboxTask.id] }),
+    );
   });
 });
 
@@ -128,6 +140,43 @@ describe("actions that take no ids touch only the caller's data", () => {
       data: { userId: w.b.id, timeZone: "Pacific/Kiritimati", defaultEstimateMin: 45 },
     });
 
+    expect(await snapshotOf(w.a.id)).toEqual(aBefore);
+  });
+
+  it("suggestPlanAction drafts from the caller's tasks only and saves nothing, even when sent A's userId", async () => {
+    const aBefore = await snapshotOf(w.a.id);
+    const bBefore = await snapshotOf(w.b.id, { except: ["sessions"] });
+
+    const result = await actions.suggestPlanAction({ availableMin: 1440, userId: w.a.id });
+
+    expect(result).toMatchObject({ ok: true });
+    expectNoneOf(w.a, result);
+    // B's due task is suggested; B's planned and dismissed tasks are excluded by id.
+    expectSomeOf(w.b, result, w.b.dueTask.title, w.b.inboxTask.id, w.b.upcomingTask.id);
+    expect(await snapshotOf(w.a.id)).toEqual(aBefore);
+    expect(await snapshotOf(w.b.id, { except: ["sessions"] })).toEqual(bBefore);
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("plan actions write only the caller's plan, even when sent A's userId", async () => {
+    const aBefore = await snapshotOf(w.a.id);
+
+    for (const result of [
+      await actions.acceptPlanAction({ taskIds: [w.b.dueTask.id], availableMin: 60, userId: w.a.id }),
+      await actions.addPlanItemAction({ taskId: w.b.upcomingTask.id, userId: w.a.id }),
+      await actions.reorderPlanAction({
+        taskIds: [w.b.upcomingTask.id, w.b.dueTask.id, w.b.inboxTask.id],
+        userId: w.a.id,
+      }),
+      await actions.removePlanItemAction({ taskId: w.b.dueTask.id, userId: w.a.id }),
+      await actions.dismissSuggestionAction({ taskId: w.b.projectTask.id, userId: w.a.id }),
+    ]) {
+      expect(result).toMatchObject({ ok: true });
+    }
+
+    const b = await snapshotOf(w.b.id);
+    expect(b.plan_items).toHaveLength(2);
+    expect(b.plan_dismissals).toHaveLength(1);
     expect(await snapshotOf(w.a.id)).toEqual(aBefore);
   });
 

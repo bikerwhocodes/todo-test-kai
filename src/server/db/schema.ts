@@ -310,3 +310,95 @@ export type Project = typeof projects.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type Subtask = typeof subtasks.$inferSelect;
 export type TaskDependency = typeof taskDependencies.$inferSelect;
+
+// Plan My Day (spec §4). Plans are keyed by the user's local date (core/dates
+// localToday). Planning only ever writes these tables: never a task's deadline,
+// priority, estimate or status.
+
+/** One user's plan for one local date. */
+export const dayPlans = pgTable(
+  "day_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    planDate: date("plan_date", { mode: "string" }).notNull(),
+    // Minutes the user said they have that day; null until they enter it.
+    availableMin: integer("available_min"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("day_plans_user_id_plan_date_unique").on(t.userId, t.planDate),
+    unique("day_plans_user_id_id_unique").on(t.userId, t.id),
+    check("day_plans_available_min_range", sql`${t.availableMin} between 0 and 1440`),
+  ],
+);
+
+export const PLAN_ITEM_SOURCES = ["suggested", "manual"] as const;
+export type PlanItemSource = (typeof PLAN_ITEM_SOURCES)[number];
+
+/**
+ * A task in a day plan, in `position` order. Positions are not unique: a reorder
+ * rewrites them all in one transaction, and removing an item leaves a gap.
+ * Deleting the task (or the plan) deletes the item; completing it doesn't.
+ */
+export const planItems = pgTable(
+  "plan_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    dayPlanId: uuid("day_plan_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    position: integer("position").notNull(),
+    source: text("source", { enum: PLAN_ITEM_SOURCES }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "plan_items_user_day_plan_fk",
+      columns: [t.userId, t.dayPlanId],
+      foreignColumns: [dayPlans.userId, dayPlans.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "plan_items_user_task_fk",
+      columns: [t.userId, t.taskId],
+      foreignColumns: [tasks.userId, tasks.id],
+    }).onDelete("cascade"),
+    unique("plan_items_day_plan_id_task_id_unique").on(t.dayPlanId, t.taskId),
+    // Deletes cascade from the task side.
+    index("plan_items_user_id_task_id_idx").on(t.userId, t.taskId),
+    check("plan_items_position_nonnegative", sql`${t.position} >= 0`),
+    check("plan_items_source_valid", sql`${t.source} in ('suggested', 'manual')`),
+  ],
+);
+
+/** "Not today": a suggestion the user dismissed, hidden for that local date only. */
+export const planDismissals = pgTable(
+  "plan_dismissals",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    planDate: date("plan_date", { mode: "string" }).notNull(),
+    taskId: uuid("task_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.planDate, t.taskId] }),
+    foreignKey({
+      name: "plan_dismissals_user_task_fk",
+      columns: [t.userId, t.taskId],
+      foreignColumns: [tasks.userId, tasks.id],
+    }).onDelete("cascade"),
+    // Deletes cascade from the task side.
+    index("plan_dismissals_user_id_task_id_idx").on(t.userId, t.taskId),
+  ],
+);
+
+export type DayPlan = typeof dayPlans.$inferSelect;
+export type PlanItem = typeof planItems.$inferSelect;
+export type PlanDismissal = typeof planDismissals.$inferSelect;

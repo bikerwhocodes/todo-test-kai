@@ -19,6 +19,8 @@ import SeriesPage, { generateMetadata as seriesMetadata } from "@/app/(app)/recu
 import SettingsPage from "@/app/(app)/settings/page";
 import TodayPage from "@/app/(app)/today/page";
 import UpcomingPage from "@/app/(app)/upcoming/page";
+import type { GroupItem } from "@/components/tasks/task-group";
+import { PlanSection } from "@/components/today/plan-section";
 import { NOT_FOUND, actAs } from "../next-mocks";
 import { PAGE_COVERAGE, type CoveredPage, type FileCases } from "./registry";
 import { expectNoneOf, expectSomeOf, seedWorld, snapshotOf, type World } from "./world";
@@ -43,11 +45,14 @@ const PAGE_CASES: FileCases<CoveredPage> = {
   ],
   "src/app/(app)/today/page.tsx": [
     [
-      "shows B's time zone, due tasks and due occurrences, not A's",
+      "shows B's time zone, plan, due tasks and due occurrences, not A's",
       async ({ a, b }) => {
         const tree = await TodayPage();
         expectNoneOf(a, tree);
         expectSomeOf(b, tree, b.timeZone, b.dueTask.title, b.occurrence.title);
+        // The plan holds exactly B's planned task (A's is planned for A's own today).
+        const plans = propsOf(tree, PlanSection) as { items: GroupItem[] }[];
+        expect(plans.map((p) => p.items.map((i) => i.task.id))).toEqual([[b.inboxTask.id]]);
       },
     ],
   ],
@@ -214,6 +219,21 @@ const PAGE_CASES: FileCases<CoveredPage> = {
     ],
   ],
 };
+
+/** The props of every element of component `type` in a React element tree. */
+function propsOf(tree: unknown, type: unknown): unknown[] {
+  const found: unknown[] = [];
+  const seen = new WeakSet<object>();
+  const visit = (v: unknown) => {
+    if (!v || typeof v !== "object" || seen.has(v)) return;
+    seen.add(v);
+    const el = v as { type?: unknown; props?: unknown };
+    if (el.type === type) found.push(el.props);
+    for (const [key, child] of Object.entries(v)) if (!key.startsWith("_")) visit(child);
+  };
+  visit(tree);
+  return found;
+}
 
 /** Every `settings` prop object in a React element tree. */
 function settingsPropsIn(tree: unknown): unknown[] {

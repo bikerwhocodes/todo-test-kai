@@ -2,8 +2,8 @@ import { TaskGroup, type GroupItem } from "@/components/tasks/task-group";
 import type { ProjectOption, TaskOption } from "@/components/tasks/types";
 
 /**
- * Today's plan. Plan My Day (M5) will pass the planned tasks in `items`; until
- * then there is no plan and this shows the empty state.
+ * Today's plan: the planned tasks in plan order, or the empty state when there is
+ * no plan yet.
  */
 export function PlanSection({
   items,
