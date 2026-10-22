@@ -12,7 +12,18 @@ const PRIORITY_CHIP: Record<number, string> = {
   3: "bg-sky-50 text-sky-800",
 };
 
-export function TaskRow({ task, projects, today }: { task: TaskView; projects: ProjectOption[]; today: string }) {
+export function TaskRow({
+  task,
+  projects,
+  today,
+  overdueBy,
+}: {
+  task: TaskView;
+  projects: ProjectOption[];
+  today: string;
+  /** Shown first in the meta line while the task is open, e.g. "3 days overdue". */
+  overdueBy?: string | null;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [done, setDone] = useOptimistic(task.done);
   const [, startTransition] = useTransition();
@@ -54,7 +65,7 @@ export function TaskRow({ task, projects, today }: { task: TaskView; projects: P
           className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
         >
           <span className={`block break-words ${done ? "text-stone-500 line-through" : ""}`}>{task.title}</span>
-          <TaskMeta task={task} done={done} today={today} />
+          <TaskMeta task={task} done={done} today={today} overdueBy={overdueBy} />
         </button>
       </div>
       {error && (
@@ -71,11 +82,29 @@ export function TaskRow({ task, projects, today }: { task: TaskView; projects: P
   );
 }
 
-function TaskMeta({ task, done, today }: { task: TaskView; done: boolean; today: string }) {
+function TaskMeta({
+  task,
+  done,
+  today,
+  overdueBy,
+}: {
+  task: TaskView;
+  done: boolean;
+  today: string;
+  overdueBy?: string | null;
+}) {
   const priority = formatPriority(task.priority);
   const subtasksDone = task.subtasks.filter((s) => s.done).length;
   const overdue = !done && task.deadline !== null && task.deadline < today;
   const chips: React.ReactNode[] = [];
+
+  if (overdueBy && !done) {
+    chips.push(
+      <span key="o" className="font-medium text-red-700">
+        {overdueBy}
+      </span>,
+    );
+  }
 
   if (priority) {
     chips.push(

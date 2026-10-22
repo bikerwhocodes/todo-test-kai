@@ -52,12 +52,14 @@ async function listTasks(userId: string, scope: SQL): Promise<TaskList> {
       .where(where("done"))
       .orderBy(desc(tasks.completedAt), asc(tasks.id)),
   ]);
-  const byTask = await subtasksFor(
-    userId,
-    [...open, ...done].map((t) => t.id),
-  );
-  const attach = (t: Task) => ({ ...t, subtasks: byTask.get(t.id) ?? [] });
-  return { open: open.map(attach), done: done.map(attach) };
+  const all = await attachSubtasks(userId, [...open, ...done]);
+  return { open: all.slice(0, open.length), done: all.slice(open.length) };
+}
+
+/** Adds each task's subtasks (in display order) with one query. Keeps the order of `rows`. */
+export async function attachSubtasks(userId: string, rows: Task[]): Promise<TaskWithSubtasks[]> {
+  const byTask = await subtasksFor(userId, rows.map((t) => t.id));
+  return rows.map((t) => ({ ...t, subtasks: byTask.get(t.id) ?? [] }));
 }
 
 async function subtasksFor(userId: string, taskIds: string[]): Promise<Map<string, Subtask[]>> {

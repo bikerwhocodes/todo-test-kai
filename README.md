@@ -55,6 +55,11 @@ pnpm dev
   can't be created in or moved into an archived project.
 - Data access lives in `src/server/repo/*`: every function takes `userId` first and scopes
   every query by it. Another user's rows behave exactly like missing ones (`NotFoundError`).
+- **Upcoming** (`/upcoming`) shows open tasks with a deadline. An Overdue group comes first, then one group for each
+  date from today through today + 13. **Today** has a Plan section, which stays empty until Plan My Day ships, and a
+  "Due today & overdue, not in plan" section. "Today" is the date in the user's profile zone
+  (`user_settings.time_zone`). Deadlines are compared only as dates (`src/core/agenda.ts`,
+  `src/server/repo/agenda.ts`).
 - Server actions (`src/server/actions/{tasks,projects}.ts`) take `unknown`, validate with the
   zod schemas in `src/lib/validation.ts` and return `{ ok, data } | { ok: false, error }`.
   For optional task fields, `null` clears the value and an omitted key leaves it unchanged.

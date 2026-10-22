@@ -15,6 +15,19 @@ All domain dates are floating `IsoDate` strings (`YYYY-MM-DD`) with no time or z
 | `compareIsoDate`, `maxIsoDate`, `minIsoDate` | Validate their inputs. |
 | `isIsoDate(v)`, `assertIsoDate(v)`, `isValidTimeZone(tz)` | Input guards for server actions and zod refinements. |
 
+## Agenda (`core/agenda.ts`)
+
+Upcoming and Today's due section. Callers pass `today = localToday(profileTz, now)`. Deadlines are compared only as `IsoDate`s, and "overdue" means `deadline < today`.
+
+| Function | Notes |
+|---|---|
+| `groupUpcoming(tasks, today, days = 14)` | Returns `{ overdue, days }`. `overdue` holds open tasks due before today, oldest first. `days` has one group per date from `today` to `today + days - 1` that has tasks. |
+| `dueNotInPlan(tasks, today, plannedIds)` | Open tasks due on or before today that are not in the plan, overdue first. |
+| `formatDayHeading(date, today)` | "Today · Thu 22 Oct", "Tomorrow · Fri 23 Oct", "Sat 24 Oct". Adds the year when it differs from today's ("Fri 1 Jan 2027"). |
+| `formatOverdue(deadline, today)` | "1 day overdue", "3 days overdue", or `null`. |
+
+Tasks that are done or skipped, or that have no deadline, are always left out.
+
 ## Recurrence (`core/recurrence`)
 
 ```ts
