@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import { type IsoDate, type Weekday, addDays, compareIsoDate, diffDays, maxIsoDate, weekdayOf } from "@/core/dates";
 import {
   type RecurrenceRule,
+  MISSED_CAP,
   firstOccurrence,
+  missedLabel,
+  missedOccurrences,
   nextOccurrence,
   nextOccurrenceAfterCompletion,
+  occurrenceOnOrAfterDate,
   occurrencesBetween,
   validateRule,
 } from "@/core/recurrence";
@@ -207,5 +211,55 @@ describe("performance", () => {
     }
     expect(d).toBeTruthy();
     expect(performance.now() - t0).toBeLessThan(50);
+  });
+});
+
+describe("occurrenceOnOrAfterDate", () => {
+  const weekly: RecurrenceRule = { kind: "weekly", interval: 1, weekdays: [1, 3], startDate: "2026-10-19" };
+
+  it("returns the date itself when it matches", () => {
+    expect(occurrenceOnOrAfterDate(weekly, "2026-10-21")).toBe("2026-10-21");
+  });
+  it("rolls forward to the next matching weekday", () => {
+    expect(occurrenceOnOrAfterDate(weekly, "2026-10-22")).toBe("2026-10-26");
+  });
+  it("never returns a date before startDate", () => {
+    expect(occurrenceOnOrAfterDate({ kind: "daily", interval: 1, startDate: "2026-11-01" }, "2026-10-01")).toBe(
+      "2026-11-01",
+    );
+  });
+  it("is null once the series has ended", () => {
+    expect(
+      occurrenceOnOrAfterDate({ kind: "daily", interval: 1, startDate: "2026-10-01", endDate: "2026-10-10" }, "2026-10-11"),
+    ).toBeNull();
+  });
+});
+
+describe("missedOccurrences / missedLabel", () => {
+  const daily: RecurrenceRule = { kind: "daily", interval: 1, startDate: "2026-10-01" };
+
+  it("is 0 when the occurrence is due today or later", () => {
+    expect(missedOccurrences(daily, "2026-10-22", "2026-10-22")).toBe(0);
+    expect(missedOccurrences(daily, "2026-10-23", "2026-10-22")).toBe(0);
+  });
+  it("counts 5 after five days away from a daily series", () => {
+    expect(missedOccurrences(daily, "2026-10-17", "2026-10-22")).toBe(5);
+    expect(missedLabel("daily", 5)).toBe("Missed 5 days");
+  });
+  it("counts only scheduled dates for weekly rules", () => {
+    const weekly: RecurrenceRule = { kind: "weekly", interval: 1, weekdays: [1], startDate: "2026-10-05" };
+    // Mondays 5, 12, 19 Oct are before Thursday 22 Oct.
+    expect(missedOccurrences(weekly, "2026-10-05", "2026-10-22")).toBe(3);
+    expect(missedLabel("weekly", 3)).toBe("Missed 3 times");
+  });
+  it("stops at the end date", () => {
+    const ended: RecurrenceRule = { ...daily, endDate: "2026-10-18" };
+    expect(missedOccurrences(ended, "2026-10-17", "2026-10-22")).toBe(2);
+  });
+  it("singular and capped labels", () => {
+    expect(missedLabel("daily", 0)).toBeNull();
+    expect(missedLabel("daily", 1)).toBe("Missed 1 day");
+    expect(missedLabel("weekly", 1)).toBe("Missed 1 time");
+    expect(missedLabel("daily", MISSED_CAP)).toBe("Missed 99+ days");
   });
 });

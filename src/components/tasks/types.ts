@@ -1,4 +1,5 @@
 import { blockedSet } from "@/core/graph";
+import type { OccurrenceBadge } from "@/server/repo/series";
 import type { TaskWithSubtasks } from "@/server/repo/tasks";
 
 // Plain shapes passed from server pages to client components.
@@ -7,6 +8,15 @@ export type SubtaskView = { id: string; title: string; done: boolean };
 
 /** A direct blocker; `open` blockers are the ones the task is waiting on. */
 export type BlockerView = { id: string; title: string; open: boolean };
+
+/** Set for an occurrence of a recurring series; null for one-off tasks. */
+export type RecurrenceView = {
+  seriesId: string;
+  kind: "daily" | "weekly";
+  occurrenceDate: string;
+  /** e.g. "Missed 5 days"; null unless the open occurrence is overdue. */
+  missedLabel: string | null;
+};
 
 export type TaskView = {
   id: string;
@@ -21,6 +31,7 @@ export type TaskView = {
   blockers: BlockerView[];
   /** Derived from the blockers' status, never stored: true iff any blocker is open. */
   blocked: boolean;
+  recurrence: RecurrenceView | null;
 };
 
 export type ProjectOption = { id: string; name: string };
@@ -28,7 +39,11 @@ export type ProjectOption = { id: string; name: string };
 /** One of the user's open tasks, offered in the "Blocked by" picker. */
 export type TaskOption = { id: string; title: string };
 
-export function toTaskView(task: TaskWithSubtasks): TaskView {
+/**
+ * `badge` comes from occurrenceBadges(); pass it explicitly (not via `.map(toTaskView)`,
+ * which would pass the index).
+ */
+export function toTaskView(task: TaskWithSubtasks, badge?: OccurrenceBadge | null): TaskView {
   const blockers = task.blockers.map((b) => ({ id: b.id, title: b.title, open: b.status === "open" }));
   const blocked = blockedSet(
     blockers,
@@ -46,5 +61,13 @@ export function toTaskView(task: TaskWithSubtasks): TaskView {
     subtasks: task.subtasks.map((s) => ({ id: s.id, title: s.title, done: s.done })),
     blockers,
     blocked,
+    recurrence: badge
+      ? {
+          seriesId: badge.seriesId,
+          kind: badge.kind,
+          occurrenceDate: badge.occurrenceDate,
+          missedLabel: badge.missedLabel,
+        }
+      : null,
   };
 }

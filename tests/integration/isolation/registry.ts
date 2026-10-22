@@ -1,5 +1,7 @@
 import type * as authActions from "@/server/actions/auth";
 import type * as projectActions from "@/server/actions/projects";
+import type * as seriesActions from "@/server/actions/series";
+import type * as settingsActions from "@/server/actions/settings";
 import type * as taskActions from "@/server/actions/tasks";
 import type { World } from "./world";
 
@@ -28,6 +30,7 @@ export const USER_OWNED_TABLES: Record<string, { ownerColumn: string }> = {
   accounts: { ownerColumn: "user_id" },
   user_settings: { ownerColumn: "user_id" },
   projects: { ownerColumn: "user_id" },
+  recurring_series: { ownerColumn: "user_id" },
   tasks: { ownerColumn: "user_id" },
   subtasks: { ownerColumn: "user_id" },
   task_dependencies: { ownerColumn: "user_id" },
@@ -42,9 +45,14 @@ export const SHARED_TABLES: Record<string, string> = {
 // ---------------------------------------------------------------------------------------
 // Server actions (every export of a "use server" module in src/server/actions)
 
-export type ActionName = keyof typeof taskActions | keyof typeof projectActions | keyof typeof authActions;
+export type ActionName =
+  | keyof typeof taskActions
+  | keyof typeof projectActions
+  | keyof typeof seriesActions
+  | keyof typeof settingsActions
+  | keyof typeof authActions;
 
-export type NotFound = "Task not found" | "Project not found" | "Subtask not found";
+export type NotFound = "Task not found" | "Project not found" | "Subtask not found" | "Series not found";
 
 export type ActionCase = {
   /** What B tries to do, e.g. "rename A's project". */
@@ -54,6 +62,8 @@ export type ActionCase = {
   /** The not-found error B must get back. */
   error: NotFound;
 };
+
+const DAILY_RULE = { kind: "daily", interval: 1, startDate: "2026-01-01" };
 
 export type ActionCoverage =
   | { cases: [ActionCase, ...ActionCase[]] }
@@ -115,6 +125,12 @@ export const ACTION_COVERAGE: Record<ActionName, ActionCoverage> = {
         input: (w) => ({ id: w.b.projectTask.id, projectId: w.a.archivedProject.id }),
         error: "Project not found",
       },
+      { name: "retitle A's open occurrence", input: (w) => ({ id: w.a.occurrence.id, title: "pwned" }), error: "Task not found" },
+      {
+        name: "edit A's completed occurrence",
+        input: (w) => ({ id: w.a.completedOccurrence.id, deadline: "2030-01-01" }),
+        error: "Task not found",
+      },
     ],
   },
   setTaskCompletedAction: {
@@ -126,6 +142,19 @@ export const ACTION_COVERAGE: Record<ActionName, ActionCoverage> = {
         input: (w) => ({ id: w.a.completedTask.id, completed: true }),
         error: "Task not found",
       },
+      // Occurrences go through the series rules (locks, next occurrence, reopen checks).
+      { name: "complete A's open occurrence", input: (w) => ({ id: w.a.occurrence.id, completed: true }), error: "Task not found" },
+      {
+        name: "re-complete A's completed occurrence",
+        input: (w) => ({ id: w.a.completedOccurrence.id, completed: true }),
+        error: "Task not found",
+      },
+      {
+        name: "reopen A's completed occurrence",
+        input: (w) => ({ id: w.a.completedOccurrence.id, completed: false }),
+        error: "Task not found",
+      },
+      { name: "reopen A's open occurrence", input: (w) => ({ id: w.a.occurrence.id, completed: false }), error: "Task not found" },
     ],
   },
   deleteTaskAction: {
@@ -133,6 +162,8 @@ export const ACTION_COVERAGE: Record<ActionName, ActionCoverage> = {
       { name: "delete A's inbox task", input: (w) => ({ id: w.a.inboxTask.id }), error: "Task not found" },
       { name: "delete A's task that has subtasks", input: (w) => ({ id: w.a.projectTask.id }), error: "Task not found" },
       { name: "delete A's completed task", input: (w) => ({ id: w.a.completedTask.id }), error: "Task not found" },
+      // Deleting one's own occurrence is a conflict; for A's it must still be not-found.
+      { name: "delete A's open occurrence", input: (w) => ({ id: w.a.occurrence.id }), error: "Task not found" },
     ],
   },
   addSubtaskAction: {
@@ -225,6 +256,82 @@ export const ACTION_COVERAGE: Record<ActionName, ActionCoverage> = {
     ],
   },
 
+  // src/server/actions/series.ts
+  createSeriesAction: {
+    cases: [
+      {
+        name: "create a series in A's project",
+        input: (w) => ({ title: "x", projectId: w.a.project.id, rule: DAILY_RULE }),
+        error: "Project not found",
+      },
+      {
+        name: "create a series in A's archived project",
+        input: (w) => ({ title: "x", projectId: w.a.archivedProject.id, rule: DAILY_RULE }),
+        error: "Project not found",
+      },
+    ],
+  },
+  updateSeriesAction: {
+    cases: [
+      { name: "retitle A's series", input: (w) => ({ id: w.a.series.id, title: "pwned" }), error: "Series not found" },
+      {
+        name: "edit every template field and the rule of A's series",
+        input: (w) => ({
+          id: w.a.series.id,
+          title: "pwned",
+          description: "pwned",
+          priority: 1,
+          estimateMin: 5,
+          rule: { kind: "weekly", interval: 2, weekdays: [1, 3], startDate: "2026-01-01", endDate: "2030-01-01" },
+        }),
+        error: "Series not found",
+      },
+      {
+        name: "clear A's optional template fields with null",
+        input: (w) => ({ id: w.a.series.id, description: null, priority: null, estimateMin: null, projectId: null }),
+        error: "Series not found",
+      },
+      { name: "send an empty patch for A's series", input: (w) => ({ id: w.a.series.id }), error: "Series not found" },
+      {
+        name: "move A's series into B's project",
+        input: (w) => ({ id: w.a.series.id, projectId: w.b.project.id }),
+        error: "Series not found",
+      },
+      {
+        name: "move B's own series into A's project",
+        input: (w) => ({ id: w.b.series.id, projectId: w.a.project.id }),
+        error: "Project not found",
+      },
+      {
+        name: "move B's own series into A's archived project",
+        input: (w) => ({ id: w.b.series.id, projectId: w.a.archivedProject.id }),
+        error: "Project not found",
+      },
+      // An occurrence id is not a series id, whoever owns it.
+      { name: "use A's occurrence id as a series id", input: (w) => ({ id: w.a.occurrence.id, title: "pwned" }), error: "Series not found" },
+    ],
+  },
+  deleteSeriesAction: {
+    cases: [
+      { name: "delete A's series", input: (w) => ({ id: w.a.series.id }), error: "Series not found" },
+      { name: "use A's occurrence id as a series id", input: (w) => ({ id: w.a.occurrence.id }), error: "Series not found" },
+    ],
+  },
+  skipOccurrenceAction: {
+    cases: [
+      { name: "skip A's open occurrence", input: (w) => ({ id: w.a.occurrence.id }), error: "Task not found" },
+      { name: "skip A's completed occurrence", input: (w) => ({ id: w.a.completedOccurrence.id }), error: "Task not found" },
+      // A one-off task of one's own is a conflict; A's must be not-found, not a hint it exists.
+      { name: "skip A's one-off task", input: (w) => ({ id: w.a.inboxTask.id }), error: "Task not found" },
+    ],
+  },
+
+  // src/server/actions/settings.ts
+  updateSettingsAction: {
+    exempt:
+      "Takes no resource id; writes the caller's own user_settings row. actions.test.ts checks a smuggled userId is ignored.",
+  },
+
   // src/server/actions/auth.ts
   signOutAction: {
     exempt: "Takes no input and ends the caller's own session. actions.test.ts checks A stays signed in when B signs out.",
@@ -255,7 +362,9 @@ export const PAGE_COVERAGE = {
   "src/app/(auth)/signup/page.tsx": { exempt: "Signed-out form; reads no data." },
   "src/app/(app)/layout.tsx": { cases: "Nav lists only the caller's projects and email." },
   "src/app/(app)/today/page.tsx": { cases: "Shows the caller's own time zone and due tasks." },
-  "src/app/(app)/upcoming/page.tsx": { cases: "Lists only the caller's tasks with deadlines, grouped in the caller's zone." },
+  "src/app/(app)/upcoming/page.tsx": {
+    cases: "Lists only the caller's tasks and occurrences with deadlines, grouped in the caller's zone.",
+  },
   "src/app/(app)/inbox/page.tsx": {
     cases: "Lists only the caller's inbox tasks, their blockers, and the caller's projects and open tasks to pick from.",
   },
@@ -266,6 +375,9 @@ export const PAGE_COVERAGE = {
   "src/app/(app)/search/page.tsx": {
     cases: "Searches only the caller's tasks and offers only the caller's projects; another user's project id matches nothing and isn't echoed back.",
   },
+  "src/app/(app)/recurring/page.tsx": { cases: "Lists only the caller's recurring series." },
+  "src/app/(app)/recurring/[id]/page.tsx": { cases: "Another user's series id is a 404; own page shows only own data." },
+  "src/app/(app)/settings/page.tsx": { cases: "Shows only the caller's own zone and default estimate." },
 } as const satisfies Record<string, FileCoverage>;
 
 type CoveredKeys<T> = { [K in keyof T]: T[K] extends { cases: string } ? K : never }[keyof T];

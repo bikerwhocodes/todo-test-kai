@@ -17,6 +17,8 @@ function task(blockers: { id: string; title: string; status: TaskStatus }[]): Ta
     estimateMin: null,
     status: "open",
     completedAt: null,
+    seriesId: null,
+    occurrenceDate: null,
     sort: 0,
     createdAt: NOW,
     updatedAt: NOW,

@@ -36,7 +36,7 @@ async function seedTask(
 ) {
   const task = await createTask(userId, { title, projectId });
   if (deadline) await updateTask(userId, task.id, { deadline });
-  if (status === "done") await setTaskCompleted(userId, task.id, true);
+  if (status === "done") await setTaskCompleted(userId, task.id, true, "2026-10-22");
   // Nothing sets "skipped" yet (series will); write it directly.
   if (status === "skipped") await db.update(tasks).set({ status: "skipped" }).where(eq(tasks.id, task.id));
   return task;

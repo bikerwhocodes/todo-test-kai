@@ -2,10 +2,12 @@ import "server-only";
 import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import { db } from "@/server/db";
 import { subtasks, tasks, type Subtask, type Task } from "@/server/db/schema";
+import type { IsoDate } from "@/core/dates";
 import { NO_PRIORITY, type TaskPatch } from "@/lib/validation";
 import { blockersFor, type Blocker } from "./dependencies";
-import { NotFoundError } from "./errors";
+import { ConflictError, NotFoundError } from "./errors";
 import { assertActiveProject } from "./projects";
+import { completeOccurrence, reopenOccurrence } from "./series";
 
 // Every function takes userId first and scopes every query by it.
 
@@ -75,7 +77,8 @@ export async function withSubtasksAndBlockers(userId: string, rows: Task[]): Pro
   return rows.map((t) => ({ ...t, subtasks: subs.get(t.id) ?? [], blockers: blockers.get(t.id) ?? [] }));
 }
 
-async function subtasksFor(userId: string, taskIds: string[]): Promise<Map<string, Subtask[]>> {
+/** The user's subtasks of `taskIds`, grouped by task in display order. */
+export async function subtasksFor(userId: string, taskIds: string[]): Promise<Map<string, Subtask[]>> {
   const map = new Map<string, Subtask[]>();
   if (taskIds.length === 0) return map;
   const rows = await db
@@ -122,8 +125,27 @@ export async function updateTask(userId: string, id: string, patch: TaskPatch): 
   return row;
 }
 
-/** Completing stamps completed_at (kept if already done); reopening clears it. */
-export async function setTaskCompleted(userId: string, id: string, completed: boolean): Promise<Task> {
+/**
+ * Completing stamps completed_at (kept if already done); reopening clears it.
+ * Occurrences of a recurring series follow the series rules instead (see ./series):
+ * completing one creates the next, and only the latest closed one can be reopened.
+ * `today` is the user's localToday; one-off tasks ignore it.
+ */
+export async function setTaskCompleted(
+  userId: string,
+  id: string,
+  completed: boolean,
+  today: IsoDate,
+): Promise<Task> {
+  const [current] = await db
+    .select({ seriesId: tasks.seriesId })
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), eq(tasks.id, id)));
+  if (!current) throw new NotFoundError("task");
+  if (current.seriesId) {
+    return completed ? completeOccurrence(userId, id, today) : reopenOccurrence(userId, id);
+  }
+
   const now = new Date();
   const [row] = await db
     .update(tasks)
@@ -138,11 +160,21 @@ export async function setTaskCompleted(userId: string, id: string, completed: bo
   return row;
 }
 
-/** Deletes the task and (by cascade) its subtasks and its links to blockers and blocked tasks. */
+/**
+ * Deletes the task and (by cascade) its subtasks and its links to blockers and
+ * blocked tasks. An occurrence of a recurring series can't be deleted on its
+ * own: it is skipped, or the series is deleted.
+ */
 export async function deleteTask(userId: string, id: string): Promise<void> {
   const deleted = await db
     .delete(tasks)
-    .where(and(eq(tasks.userId, userId), eq(tasks.id, id)))
+    .where(and(eq(tasks.userId, userId), eq(tasks.id, id), isNull(tasks.seriesId)))
     .returning({ id: tasks.id });
-  if (deleted.length === 0) throw new NotFoundError("task");
+  if (deleted.length > 0) return;
+  const [occurrence] = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), eq(tasks.id, id)));
+  if (!occurrence) throw new NotFoundError("task");
+  throw new ConflictError("Skip this occurrence or delete the series instead");
 }

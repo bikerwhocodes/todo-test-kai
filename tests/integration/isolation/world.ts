@@ -1,10 +1,20 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { expect } from "vitest";
 import { db } from "@/server/db";
-import { localToday } from "@/core/dates";
-import { session, taskDependencies, type Project, type Subtask, type Task, type TaskDependency } from "@/server/db/schema";
+import { addDays, localToday } from "@/core/dates";
+import {
+  session,
+  taskDependencies,
+  tasks,
+  type Project,
+  type RecurringSeries,
+  type Subtask,
+  type Task,
+  type TaskDependency,
+} from "@/server/db/schema";
 import { addBlocker } from "@/server/repo/dependencies";
 import { createProject, setProjectArchived } from "@/server/repo/projects";
+import { createSeries } from "@/server/repo/series";
 import { addSubtask } from "@/server/repo/subtasks";
 import { createTask, setTaskCompleted, updateTask } from "@/server/repo/tasks";
 import { resetDb } from "../helpers";
@@ -26,11 +36,17 @@ export type Account = SignedUp & {
   projectTask: Task;
   completedTask: Task;
   archivedProjectTask: Task;
-  /** Inbox task due on the user's local today, so it shows on Today and Upcoming. */
+  /** Inbox task with today's deadline (Today's due list). */
   dueTask: Task;
+  /** Inbox task due two days from today (the Upcoming view). */
+  upcomingTask: Task;
   subtask: Subtask;
   /** projectTask is blocked by inboxTask (both open, so projectTask shows "Waiting on"). */
   dependency: TaskDependency;
+  /** Daily series in `project`: yesterday's occurrence is done, today's is open. */
+  series: RecurringSeries;
+  occurrence: Task;
+  completedOccurrence: Task;
 };
 
 export type World = { a: Account; b: Account };
@@ -68,13 +84,37 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
     estimateMin: 25,
   });
   let completedTask = await createTask(user.id, { title: `${marker} completed task` });
-  completedTask = await setTaskCompleted(user.id, completedTask.id, true);
-  let dueTask = await createTask(user.id, { title: `${marker} due task` });
-  dueTask = await updateTask(user.id, dueTask.id, { deadline: localToday(timeZone, new Date()) });
+  const today = localToday(timeZone, new Date());
+  completedTask = await setTaskCompleted(user.id, completedTask.id, true, today);
   const subtask = await addSubtask(user.id, projectTask.id, `${marker} subtask`);
   await addBlocker(user.id, projectTask.id, inboxTask.id);
   const [dependency] = await db.select().from(taskDependencies).where(eq(taskDependencies.userId, user.id));
   if (!dependency) throw new Error(`no task_dependencies row for ${slug}`);
+  const dueTask = await updateTask(user.id, (await createTask(user.id, { title: `${marker} due task` })).id, {
+    deadline: today,
+  });
+  const upcomingTask = await updateTask(user.id, (await createTask(user.id, { title: `${marker} upcoming task` })).id, {
+    deadline: addDays(today, 2),
+  });
+
+  // Started yesterday and completed then, so the open occurrence is due today.
+  const yesterday = addDays(today, -1);
+  const { series, occurrence: first } = await createSeries(
+    user.id,
+    {
+      title: `${marker} series`,
+      description: `${marker} series description`,
+      projectId: project.id,
+      rule: { kind: "daily", interval: 1, weekdays: null, startDate: yesterday, endDate: null },
+    },
+    yesterday,
+  );
+  const completedOccurrence = await setTaskCompleted(user.id, first!.id, true, yesterday);
+  const [occurrence] = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.userId, user.id), eq(tasks.seriesId, series.id), eq(tasks.status, "open")));
+  if (!occurrence) throw new Error(`no open occurrence for ${slug}`);
 
   return {
     ...user,
@@ -88,8 +128,12 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
     completedTask,
     archivedProjectTask,
     dueTask,
+    upcomingTask,
     subtask,
     dependency,
+    series,
+    occurrence,
+    completedOccurrence,
   };
 }
 
@@ -126,7 +170,11 @@ export function fingerprints(account: Account): string[] {
     account.completedTask.id,
     account.archivedProjectTask.id,
     account.dueTask.id,
+    account.upcomingTask.id,
     account.subtask.id,
+    account.series.id,
+    account.occurrence.id,
+    account.completedOccurrence.id,
   ];
 }
 
@@ -152,10 +200,14 @@ export function stringsIn(value: unknown): string[] {
   return out;
 }
 
-/** Fails if anything identifying `owner` appears in `value` (what someone else was shown). */
-export function expectNoneOf(owner: Account, value: unknown) {
+/**
+ * Fails if anything identifying `owner` appears in `value` (what someone else was shown).
+ * `allow` lists fingerprints that are public there, e.g. a zone name in a picker of every zone.
+ */
+export function expectNoneOf(owner: Account, value: unknown, { allow = [] as string[] } = {}) {
   const strings = stringsIn(value);
   for (const print of fingerprints(owner)) {
+    if (allow.includes(print)) continue;
     const hit = strings.find((s) => s.includes(print));
     expect(hit, `leaked "${print}" (belongs to ${owner.email})`).toBeUndefined();
   }

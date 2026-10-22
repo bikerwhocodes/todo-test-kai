@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { DependencyCycleError, NotFoundError } from "@/server/repo/errors";
+import { ConflictError, DependencyCycleError, NotFoundError } from "@/server/repo/errors";
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
@@ -35,6 +35,7 @@ export async function runAction<S extends z.ZodType, T>(
       return { ok: false, error: `${what} not found` };
     }
     if (error instanceof DependencyCycleError) return { ok: false, error: error.message };
+    if (error instanceof ConflictError) return { ok: false, error: error.message };
     throw error;
   }
 }

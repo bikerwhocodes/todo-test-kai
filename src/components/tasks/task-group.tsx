@@ -1,13 +1,25 @@
 import { formatOverdue } from "@/core/agenda";
+import type { OccurrenceBadge } from "@/server/repo/series";
 import type { TaskWithSubtasks } from "@/server/repo/tasks";
 import { TaskRow } from "./task-row";
 import { toTaskView, type ProjectOption, type TaskOption, type TaskView } from "./types";
 
 export type GroupItem = { task: TaskView; overdueBy?: string | null };
 
-/** Rows for TaskGroup; tasks due before `today` say how overdue they are. */
-export function toGroupItems(tasks: TaskWithSubtasks[], today: string): GroupItem[] {
-  return tasks.map((t) => ({ task: toTaskView(t), overdueBy: t.deadline ? formatOverdue(t.deadline, today) : null }));
+/**
+ * Rows for TaskGroup; tasks due before `today` say how overdue they are. Occurrences
+ * of a recurring series show "Missed …" from their badge instead.
+ */
+export function toGroupItems(
+  tasks: TaskWithSubtasks[],
+  today: string,
+  badges: Map<string, OccurrenceBadge> = new Map(),
+): GroupItem[] {
+  return tasks.map((t) => {
+    const badge = badges.get(t.id) ?? null;
+    const overdueBy = !badge && t.deadline ? formatOverdue(t.deadline, today) : null;
+    return { task: toTaskView(t, badge), overdueBy };
+  });
 }
 
 /** A headed list of open tasks (an Upcoming date, Overdue, Today's sections). Rows behave as in Inbox. */

@@ -23,6 +23,8 @@ import {
 import { CHECK_VIOLATION, createUser, expectPgError, resetDb } from "./helpers";
 
 let userId: string;
+// The user's localToday; one-off tasks ignore it (see series.test.ts for occurrences).
+const TODAY = "2026-10-22";
 
 beforeEach(async () => {
   await resetDb();
@@ -185,36 +187,36 @@ describe("editing a task", () => {
 describe("completing and reopening", () => {
   it("complete sets status done and completedAt", async () => {
     const task = await createTask(userId, { title: "x" });
-    const done = await setTaskCompleted(userId, task.id, true);
+    const done = await setTaskCompleted(userId, task.id, true, TODAY);
     expect(done.status).toBe("done");
     expect(done.completedAt).toBeInstanceOf(Date);
   });
 
   it("completing an already-done task keeps the original completedAt", async () => {
     const task = await createTask(userId, { title: "x" });
-    await setTaskCompleted(userId, task.id, true);
+    await setTaskCompleted(userId, task.id, true, TODAY);
     const original = new Date("2026-01-15T09:30:00Z");
     await db.update(tasks).set({ completedAt: original }).where(eq(tasks.id, task.id));
 
-    const again = await setTaskCompleted(userId, task.id, true);
+    const again = await setTaskCompleted(userId, task.id, true, TODAY);
     expect(again.status).toBe("done");
     expect(again.completedAt).toEqual(original);
   });
 
   it("reopen sets status open and clears completedAt", async () => {
     const task = await createTask(userId, { title: "x" });
-    await setTaskCompleted(userId, task.id, true);
+    await setTaskCompleted(userId, task.id, true, TODAY);
 
-    const reopened = await setTaskCompleted(userId, task.id, false);
+    const reopened = await setTaskCompleted(userId, task.id, false, TODAY);
     expect(reopened).toMatchObject({ status: "open", completedAt: null });
     expect(await getTask(userId, task.id)).toMatchObject({ status: "open", completedAt: null });
   });
 
   it("completing after reopening stamps a fresh completedAt", async () => {
     const task = await createTask(userId, { title: "x" });
-    await setTaskCompleted(userId, task.id, true);
-    await setTaskCompleted(userId, task.id, false);
-    const again = await setTaskCompleted(userId, task.id, true);
+    await setTaskCompleted(userId, task.id, true, TODAY);
+    await setTaskCompleted(userId, task.id, false, TODAY);
+    const again = await setTaskCompleted(userId, task.id, true, TODAY);
     expect(again.completedAt).toBeInstanceOf(Date);
   });
 
@@ -227,7 +229,7 @@ describe("completing and reopening", () => {
 
     const task = await createTask(userId, { title: "x" });
     await expectPgError(db.update(tasks).set({ status: "done" }).where(eq(tasks.id, task.id)), CHECK_VIOLATION);
-    await setTaskCompleted(userId, task.id, true);
+    await setTaskCompleted(userId, task.id, true, TODAY);
     await expectPgError(db.update(tasks).set({ status: "open" }).where(eq(tasks.id, task.id)), CHECK_VIOLATION);
   });
 });
@@ -262,8 +264,8 @@ describe("task lists", () => {
     await db.update(tasks).set({ createdAt: at("2026-01-01T00:00:00Z") }).where(eq(tasks.id, b!.id));
     await db.update(tasks).set({ createdAt: at("2026-01-02T00:00:00Z") }).where(eq(tasks.id, c!.id));
 
-    await setTaskCompleted(userId, d!.id, true);
-    await setTaskCompleted(userId, e!.id, true);
+    await setTaskCompleted(userId, d!.id, true, TODAY);
+    await setTaskCompleted(userId, e!.id, true, TODAY);
     await db.update(tasks).set({ completedAt: at("2026-02-01T00:00:00Z") }).where(eq(tasks.id, d!.id));
     await db.update(tasks).set({ completedAt: at("2026-02-05T00:00:00Z") }).where(eq(tasks.id, e!.id));
 
@@ -279,7 +281,7 @@ describe("task lists", () => {
     const inboxTask = await createTask(userId, { title: "inbox" });
     const homeTask = await createTask(userId, { title: "home", projectId: home.id });
     const workTask = await createTask(userId, { title: "work", projectId: work.id });
-    await setTaskCompleted(userId, workTask.id, true);
+    await setTaskCompleted(userId, workTask.id, true, TODAY);
 
     const inbox = await listInboxTasks(userId);
     expect(ids(inbox.open)).toEqual([inboxTask.id]);

@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { z } from "zod";
-import { isoDateInTimeZone } from "@/core/format";
+import { localToday } from "@/core/dates";
 import { ProjectHeader } from "@/components/projects/project-header";
 import { QuickAdd } from "@/components/tasks/quick-add";
 import { TaskList } from "@/components/tasks/task-list";
 import { toTaskView } from "@/components/tasks/types";
 import { getProject, listProjects } from "@/server/repo/projects";
+import { occurrenceBadges } from "@/server/repo/series";
 import { listOpenTaskTitles, listProjectTasks } from "@/server/repo/tasks";
 import { getUserSettings } from "@/server/repo/user-settings";
 import { requireUser } from "@/server/session";
@@ -38,6 +39,8 @@ export default async function ProjectPage({ params }: Props) {
     getUserSettings(user.id),
     listOpenTaskTitles(user.id),
   ]);
+  const today = localToday(settings.timeZone, new Date());
+  const badges = await occurrenceBadges(user.id, [...tasks.open, ...tasks.done], today);
   const archived = project.archivedAt !== null;
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
   // Archived projects are left out of listProjects; keep this one selectable for its own tasks.
@@ -54,11 +57,11 @@ export default async function ProjectPage({ params }: Props) {
         <QuickAdd key={project.id} projectId={project.id} placeholder={`Add a task to ${project.name}…`} />
       )}
       <TaskList
-        open={tasks.open.map(toTaskView)}
-        done={tasks.done.map(toTaskView)}
+        open={tasks.open.map((t) => toTaskView(t, badges.get(t.id)))}
+        done={tasks.done.map((t) => toTaskView(t, badges.get(t.id)))}
         projects={projectOptions}
         taskOptions={taskOptions}
-        today={isoDateInTimeZone(new Date(), settings.timeZone)}
+        today={today}
         emptyText={archived ? "No open tasks." : "No open tasks. Add one above."}
       />
     </section>

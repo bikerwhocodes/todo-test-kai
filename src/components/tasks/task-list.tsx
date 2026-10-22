@@ -9,6 +9,7 @@ export function TaskList({
   taskOptions,
   today,
   emptyText,
+  label = "Open tasks",
 }: {
   open: TaskView[];
   done: TaskView[];
@@ -16,11 +17,13 @@ export function TaskList({
   taskOptions: TaskOption[];
   today: string;
   emptyText: string;
+  /** Accessible name of the open list. */
+  label?: string;
 }) {
   return (
     <div>
       {open.length > 0 ? (
-        <ul aria-label="Open tasks">
+        <ul aria-label={label}>
           {open.map((task) => (
             <TaskRow key={task.id} task={task} projects={projects} taskOptions={taskOptions} today={today} />
           ))}

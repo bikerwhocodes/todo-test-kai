@@ -2,7 +2,17 @@ import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_SEARCH_QUERY, type SearchQuery } from "@/core/search";
 import { db } from "@/server/db";
-import { projects, subtasks, taskDependencies, tasks, type Project, type Subtask, type Task } from "@/server/db/schema";
+import {
+  projects,
+  recurringSeries,
+  subtasks,
+  taskDependencies,
+  tasks,
+  userSettings,
+  type Project,
+  type Subtask,
+  type Task,
+} from "@/server/db/schema";
 import { addBlocker, blockersFor, removeBlocker } from "@/server/repo/dependencies";
 import { NotFoundError } from "@/server/repo/errors";
 import {
@@ -14,6 +24,16 @@ import {
 } from "@/server/repo/projects";
 import { listDueTasks, listUpcomingTasks } from "@/server/repo/agenda";
 import { searchTasks } from "@/server/repo/search";
+import {
+  createSeries,
+  deleteSeries,
+  getSeriesDetail,
+  listDueOccurrences,
+  listSeries,
+  occurrenceBadges,
+  skipOccurrence,
+  updateSeries,
+} from "@/server/repo/series";
 import { addSubtask, deleteSubtask, updateSubtask } from "@/server/repo/subtasks";
 import {
   createTask,
@@ -25,6 +45,7 @@ import {
   setTaskCompleted,
   updateTask,
 } from "@/server/repo/tasks";
+import { getUserSettings, updateUserSettings } from "@/server/repo/user-settings";
 import { CHECK_VIOLATION, FK_VIOLATION, createUser, expectPgError, resetDb } from "../helpers";
 
 // Repo layer: user B must never read or change anything of user A's, through the repo or the database.
@@ -37,7 +58,9 @@ let aTask: Task;
 let aInboxTask: Task;
 let aSubtask: Subtask;
 
-const rowOf = async (table: typeof tasks | typeof projects | typeof subtasks, id: string) =>
+const TODAY = "2026-10-22";
+
+const rowOf = async (table: typeof tasks | typeof projects | typeof subtasks | typeof recurringSeries, id: string) =>
   (await db.select().from(table).where(eq(table.id, id)))[0];
 
 beforeEach(async () => {
@@ -85,18 +108,35 @@ describe("tasks", () => {
     await expect(updateTask(b, aTask.id, { projectId: bProject.id })).rejects.toMatchObject({ entity: "task" });
     await expect(updateTask(b, aTask.id, { projectId: aProject.id })).rejects.toMatchObject({ entity: "task" });
     await expect(updateTask(b, aTask.id, { projectId: null })).rejects.toMatchObject({ entity: "task" });
-    await expect(setTaskCompleted(b, aTask.id, true)).rejects.toMatchObject({ entity: "task" });
+    await expect(setTaskCompleted(b, aTask.id, true, TODAY)).rejects.toMatchObject({ entity: "task" });
     await expect(deleteTask(b, aTask.id)).rejects.toMatchObject({ entity: "task" });
 
     expect(await rowOf(tasks, aTask.id)).toEqual(before);
     expect(await rowOf(subtasks, aSubtask.id)).toBeDefined();
   });
 
+  it("B's Today and Upcoming lists never include A's dated tasks or occurrences", async () => {
+    await updateTask(a, aTask.id, { deadline: "2026-10-22" });
+    await updateTask(a, aInboxTask.id, { deadline: "2026-10-24" });
+    await createSeries(
+      a,
+      { title: "Alice's series", rule: { kind: "daily", interval: 1, weekdays: null, startDate: "2026-10-23", endDate: null } },
+      TODAY,
+    );
+
+    expect(ids(await listDueTasks(a, TODAY))).toEqual([aTask.id]);
+    expect(await listUpcomingTasks(a, TODAY)).toHaveLength(3);
+    expect(await listDueTasks(b, TODAY)).toEqual([]);
+    expect(await listDueTasks(b, "2030-01-01")).toEqual([]);
+    expect(await listUpcomingTasks(b, TODAY)).toEqual([]);
+    expect(await listUpcomingTasks(b, "2026-10-21")).toEqual([]);
+  });
+
   it("B cannot reopen A's completed task", async () => {
-    await setTaskCompleted(a, aInboxTask.id, true);
+    await setTaskCompleted(a, aInboxTask.id, true, TODAY);
     const before = await rowOf(tasks, aInboxTask.id);
 
-    await expect(setTaskCompleted(b, aInboxTask.id, false)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(setTaskCompleted(b, aInboxTask.id, false, TODAY)).rejects.toBeInstanceOf(NotFoundError);
     expect(await rowOf(tasks, aInboxTask.id)).toEqual(before);
   });
 
@@ -230,6 +270,66 @@ describe("projects", () => {
   });
 });
 
+describe("recurring series", () => {
+  const daily = { kind: "daily" as const, interval: 1, weekdays: null, startDate: "2026-10-01", endDate: null };
+
+  it("B cannot read, edit, skip, complete, reopen or delete A's series and occurrences", async () => {
+    const { series, occurrence } = await createSeries(a, { title: "Alice's series", projectId: aProject.id, rule: daily }, "2026-10-20");
+    const done = await setTaskCompleted(a, occurrence!.id, true, "2026-10-20");
+    const open = (await getSeriesDetail(a, series.id))!.open!;
+    const seriesBefore = await rowOf(recurringSeries, series.id);
+    const doneBefore = await rowOf(tasks, done.id);
+    const openBefore = await rowOf(tasks, open.id);
+    const bProject = await createProject(b, { name: "Bob's project" });
+
+    expect(await listSeries(b)).toEqual([]);
+    expect(await getSeriesDetail(b, series.id)).toBeNull();
+    expect(await listDueOccurrences(b, "2030-01-01")).toEqual([]);
+    expect((await occurrenceBadges(b, [open], "2030-01-01")).size).toBe(0);
+
+    await expect(updateSeries(b, series.id, { title: "pwned" }, TODAY)).rejects.toMatchObject({ entity: "series" });
+    await expect(updateSeries(b, series.id, { projectId: bProject.id }, TODAY)).rejects.toMatchObject({ entity: "series" });
+    await expect(updateSeries(b, series.id, { rule: { ...daily, interval: 2 } }, TODAY)).rejects.toMatchObject({
+      entity: "series",
+    });
+    await expect(deleteSeries(b, series.id)).rejects.toMatchObject({ entity: "series" });
+    await expect(skipOccurrence(b, open.id, TODAY)).rejects.toMatchObject({ entity: "task" });
+    await expect(setTaskCompleted(b, open.id, true, TODAY)).rejects.toMatchObject({ entity: "task" });
+    await expect(setTaskCompleted(b, done.id, false, TODAY)).rejects.toMatchObject({ entity: "task" });
+    await expect(deleteTask(b, open.id)).rejects.toMatchObject({ entity: "task" });
+    await expect(updateTask(b, open.id, { title: "pwned" })).rejects.toMatchObject({ entity: "task" });
+
+    expect(await rowOf(recurringSeries, series.id)).toEqual(seriesBefore);
+    expect(await rowOf(tasks, done.id)).toEqual(doneBefore);
+    expect(await rowOf(tasks, open.id)).toEqual(openBefore);
+  });
+
+  it("B cannot create a series in, or move B's series into, A's project", async () => {
+    await expect(createSeries(b, { title: "x", projectId: aProject.id, rule: daily }, TODAY)).rejects.toMatchObject({
+      entity: "project",
+    });
+    expect(await listSeries(b)).toEqual([]);
+
+    const { series } = await createSeries(b, { title: "Bob's series", rule: daily }, TODAY);
+    await expect(updateSeries(b, series.id, { projectId: aProject.id }, TODAY)).rejects.toMatchObject({
+      entity: "project",
+    });
+    expect((await getSeriesDetail(b, series.id))!.projectId).toBeNull();
+  });
+});
+
+describe("settings", () => {
+  it("updating B's settings never touches A's row", async () => {
+    const aBefore = await getUserSettings(a);
+    await getUserSettings(b);
+
+    const row = await updateUserSettings(b, { timeZone: "Pacific/Kiritimati", defaultEstimateMin: 45 });
+
+    expect(row).toMatchObject({ userId: b, timeZone: "Pacific/Kiritimati", defaultEstimateMin: 45 });
+    expect((await db.select().from(userSettings).where(eq(userSettings.userId, a)))[0]).toEqual(aBefore);
+  });
+});
+
 describe("database constraints", () => {
   it("refuse a task owned by B that points at A's project", async () => {
     await expectPgError(db.insert(tasks).values({ userId: b, title: "x", projectId: aProject.id }), FK_VIOLATION);
@@ -237,6 +337,19 @@ describe("database constraints", () => {
     const bTask = await createTask(b, { title: "Bob's task" });
     await expectPgError(
       db.update(tasks).set({ projectId: aProject.id }).where(eq(tasks.id, bTask.id)),
+      FK_VIOLATION,
+    );
+  });
+
+  it("refuse an occurrence owned by B in A's series", async () => {
+    const { series } = await createSeries(
+      a,
+      { title: "Alice's series", rule: { kind: "daily", interval: 1, weekdays: null, startDate: TODAY, endDate: null } },
+      TODAY,
+    );
+    await expectPgError(
+      // Skipped, so the one-open-per-series index can't fire before the foreign key.
+      db.insert(tasks).values({ userId: b, title: "x", seriesId: series.id, occurrenceDate: "2030-01-01", status: "skipped" }),
       FK_VIOLATION,
     );
   });

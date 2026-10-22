@@ -4,6 +4,7 @@ import { localToday } from "@/core/dates";
 import { TaskGroup, toGroupItems } from "@/components/tasks/task-group";
 import { listUpcomingTasks } from "@/server/repo/agenda";
 import { listProjects } from "@/server/repo/projects";
+import { occurrenceBadges } from "@/server/repo/series";
 import { listOpenTaskTitles } from "@/server/repo/tasks";
 import { getUserSettings } from "@/server/repo/user-settings";
 import { requireUser } from "@/server/session";
@@ -15,10 +16,13 @@ export default async function UpcomingPage() {
   const settings = await getUserSettings(user.id);
   // "Today" is the date in the user's profile zone, not the server's.
   const today = localToday(settings.timeZone, new Date());
-  const [tasks, projects, taskOptions] = await Promise.all([listUpcomingTasks(user.id, today), listProjects(user.id),
+  const [tasks, projects, taskOptions] = await Promise.all([
+    listUpcomingTasks(user.id, today),
+    listProjects(user.id),
     listOpenTaskTitles(user.id),
   ]);
   const { overdue, days } = groupUpcoming(tasks, today);
+  const badges = await occurrenceBadges(user.id, tasks, today);
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
 
   return (
@@ -37,9 +41,9 @@ export default async function UpcomingPage() {
             <TaskGroup
               heading="Overdue"
               tone="overdue"
-              items={toGroupItems(overdue, today)}
+              items={toGroupItems(overdue, today, badges)}
               projects={projectOptions}
-          taskOptions={taskOptions}
+              taskOptions={taskOptions}
               today={today}
             />
           )}
@@ -47,9 +51,9 @@ export default async function UpcomingPage() {
             <TaskGroup
               key={group.date}
               heading={formatDayHeading(group.date, today)}
-              items={toGroupItems(group.tasks, today)}
+              items={toGroupItems(group.tasks, today, badges)}
               projects={projectOptions}
-          taskOptions={taskOptions}
+              taskOptions={taskOptions}
               today={today}
             />
           ))}
