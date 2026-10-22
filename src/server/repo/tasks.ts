@@ -64,11 +64,15 @@ async function listTasks(userId: string, scope: SQL): Promise<TaskList> {
       .where(where("done"))
       .orderBy(desc(tasks.completedAt), asc(tasks.id)),
   ]);
-  // One query each for every task's subtasks and blockers, not one per task.
-  const ids = [...open, ...done].map((t) => t.id);
+  const all = await withSubtasksAndBlockers(userId, [...open, ...done]);
+  return { open: all.slice(0, open.length), done: all.slice(open.length) };
+}
+
+/** Attaches each listed task's subtasks and blockers: one query each, not one per task. */
+export async function withSubtasksAndBlockers(userId: string, rows: Task[]): Promise<TaskWithSubtasks[]> {
+  const ids = rows.map((t) => t.id);
   const [subs, blockers] = await Promise.all([subtasksFor(userId, ids), blockersFor(userId, ids)]);
-  const attach = (t: Task) => ({ ...t, subtasks: subs.get(t.id) ?? [], blockers: blockers.get(t.id) ?? [] });
-  return { open: open.map(attach), done: done.map(attach) };
+  return rows.map((t) => ({ ...t, subtasks: subs.get(t.id) ?? [], blockers: blockers.get(t.id) ?? [] }));
 }
 
 async function subtasksFor(userId: string, taskIds: string[]): Promise<Map<string, Subtask[]>> {

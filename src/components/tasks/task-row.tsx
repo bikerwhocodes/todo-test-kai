@@ -17,11 +17,14 @@ export function TaskRow({
   projects,
   taskOptions,
   today,
+  projectLabel,
 }: {
   task: TaskView;
   projects: ProjectOption[];
   taskOptions: TaskOption[];
   today: string;
+  /** Where the task lives ("Inbox" or a project name), for lists that mix projects. */
+  projectLabel?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [done, setDone] = useOptimistic(task.done);
@@ -64,7 +67,7 @@ export function TaskRow({
           className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
         >
           <span className={`block break-words ${done ? "text-stone-500 line-through" : ""}`}>{task.title}</span>
-          <TaskMeta task={task} done={done} today={today} />
+          <TaskMeta task={task} done={done} today={today} projectLabel={projectLabel} />
         </button>
       </div>
       {error && (
@@ -81,11 +84,30 @@ export function TaskRow({
   );
 }
 
-function TaskMeta({ task, done, today }: { task: TaskView; done: boolean; today: string }) {
+function TaskMeta({
+  task,
+  done,
+  today,
+  projectLabel,
+}: {
+  task: TaskView;
+  done: boolean;
+  today: string;
+  projectLabel?: string;
+}) {
   const priority = formatPriority(task.priority);
   const subtasksDone = task.subtasks.filter((s) => s.done).length;
   const overdue = !done && task.deadline !== null && task.deadline < today;
   const chips: React.ReactNode[] = [];
+
+  if (projectLabel) {
+    chips.push(
+      <span key="l" className="max-w-48 truncate text-stone-400">
+        <span className="sr-only">In </span>
+        {projectLabel}
+      </span>,
+    );
+  }
 
   // Only open tasks are badged; a completed task isn't waiting on anything.
   if (!done && task.blocked) {

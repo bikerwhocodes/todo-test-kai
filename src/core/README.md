@@ -35,3 +35,15 @@ Semantics:
 - The schedule is fixed. It is anchored at `startDate` (Todoist's `every`, not `every!`).
 - Weekly rules use Monday-based weeks. Week 0 is the week that contains `startDate`, and every `interval`-th week after that is active.
 - Invalid rules or dates throw `RangeError`.
+
+## Search (`core/search.ts`)
+
+The `/search` URL contract (see the main README for the params).
+
+| Function | Notes |
+|---|---|
+| `parseSearchQuery(params): SearchQuery` | Takes Next's `searchParams` (first value of a repeated key). Invalid values become the default; never throws. |
+| `searchQueryToParams(query)`, `searchHref(query)` | Canonical: fixed key order, defaults omitted. Round-trips through `parseSearchQuery`. |
+| `hasActiveFilters(query)` | Anything other than the default (open tasks, no text). |
+| `escapeLike(text)` | Escapes `\`, `%` and `_` for `LIKE`/`ILIKE`. |
+| `shouldFocusSearch(event, target)` | Whether a keydown is the `/` shortcut (not in text fields, dialogs, or with Ctrl/Meta/Alt). |

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { NavLinks } from "@/components/projects/nav-links";
 import { NewProjectForm } from "@/components/projects/new-project-form";
+import { SearchShortcut } from "@/components/search/search-shortcut";
 import { listProjects } from "@/server/repo/projects";
 import { requireUser } from "@/server/session";
 
@@ -24,6 +25,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             primary={[
               { href: "/today", label: "Today" },
               { href: "/inbox", label: "Inbox" },
+              { href: "/search", label: "Search" },
             ]}
             projects={projects.map((p) => ({ href: `/projects/${p.id}`, label: p.name }))}
           />
@@ -41,6 +43,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </aside>
         <main className="min-w-0 flex-1 py-6 md:max-w-3xl md:pt-0">{children}</main>
       </div>
+      <SearchShortcut />
     </div>
   );
 }

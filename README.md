@@ -75,6 +75,31 @@ pnpm dev
   and removing a missing one are no-ops.
 - List views load every listed task's blockers in one query.
 
+## Search
+
+`/search` (in the nav after Inbox) finds the user's tasks by text and filters. All filters are
+ANDed in one SQL query (`src/server/repo/search.ts`), scoped by `user_id` like every repo function.
+The URL is the state: the filter bar rewrites it with `router.replace` (text after 250 ms, selects
+at once), so reload, back/forward and shared links show the same search. Without JavaScript it is a
+plain `GET` form. `src/core/search.ts` parses and writes the params; invalid values are dropped,
+never an error, and written URLs are canonical (fixed key order, defaults left out).
+
+| Param | Values | Omitted |
+|---|---|---|
+| `q` | Case-insensitive substring of title or notes (one phrase; `%`, `_`, `\` match literally). Trimmed, whitespace collapsed, max 200 characters. | No text filter |
+| `project` | A project id (archived ones too), or `inbox` | All projects |
+| `priority` | `1`–`4` (`4` = none) | Any |
+| `status` | `open`, `done`, `skipped`, `all` | `open` |
+| `due` | `overdue` (open, deadline before the user's local today), `has`, `none` | Any |
+| `blocked` | `1`: open and waiting on an open blocker; `0`: everything else | Either |
+| `estimate` | `1`: has an estimate; `0`: has none | Either |
+
+Results are open tasks first, then by priority, deadline (none last) and age, capped at 200 with a
+note when there are more. Another user's project id matches nothing and isn't shown back.
+
+Press `/` anywhere in the app (outside text fields and dialogs) to focus the search box, or to open
+`/search` from another page. `Escape` leaves the search box.
+
 ## Account isolation
 
 One account must never read or change another's data. `tests/integration/isolation/` proves it

@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_SEARCH_QUERY, type SearchQuery } from "@/core/search";
 import { db } from "@/server/db";
 import { projects, subtasks, taskDependencies, tasks, type Project, type Subtask, type Task } from "@/server/db/schema";
 import { addBlocker, blockersFor, removeBlocker } from "@/server/repo/dependencies";
@@ -11,6 +12,7 @@ import {
   renameProject,
   setProjectArchived,
 } from "@/server/repo/projects";
+import { searchTasks } from "@/server/repo/search";
 import { addSubtask, deleteSubtask, updateSubtask } from "@/server/repo/subtasks";
 import {
   createTask,
@@ -150,6 +152,47 @@ describe("task dependencies", () => {
     ]);
     const bTask = await createTask(b, { title: "Bob's task" });
     expect((await listInboxTasks(b)).open.map((t) => [t.id, t.blockers])).toEqual([[bTask.id, []]]);
+  });
+});
+
+describe("search", () => {
+  const TODAY = "2030-01-01";
+  const query = (q: Partial<SearchQuery>): SearchQuery => ({ ...DEFAULT_SEARCH_QUERY, ...q });
+
+  it("B's searches never return A's tasks, whatever the filters", async () => {
+    await updateTask(a, aTask.id, { priority: 1, deadline: "2026-01-01", estimateMin: 5, description: "Alice's notes" });
+    const queries: SearchQuery[] = [
+      query({}),
+      query({ status: "all" }),
+      query({ q: "alice", status: "all" }),
+      query({ q: "notes", status: "all" }),
+      query({ project: aProject.id }),
+      query({ project: aProject.id, status: "all" }),
+      query({ project: "inbox", status: "all" }),
+      query({ priority: 1 }),
+      query({ due: "overdue" }),
+      query({ due: "has", status: "all" }),
+      query({ blocked: true }),
+      query({ blocked: false, status: "all" }),
+      query({ estimate: true }),
+      query({ q: "task", project: aProject.id, priority: 1, due: "overdue", blocked: true, estimate: true }),
+    ];
+    const bTask = await createTask(b, { title: "Bob's task" });
+    for (const q of queries) {
+      const { tasks: found } = await searchTasks(b, q, TODAY);
+      expect(ids(found).filter((id) => id !== bTask.id), JSON.stringify(q)).toEqual([]);
+    }
+    // Positive control: A finds the same task with the combined filter.
+    expect(ids((await searchTasks(a, queries.at(-1)!, TODAY)).tasks)).toEqual([aTask.id]);
+  });
+
+  it("A's open blockers don't make B's tasks blocked", async () => {
+    const bTask = await createTask(b, { title: "Bob's task" });
+    expect(ids((await searchTasks(b, query({ blocked: true }), TODAY)).tasks)).toEqual([]);
+    expect(ids((await searchTasks(b, query({ blocked: false }), TODAY)).tasks)).toEqual([bTask.id]);
+    // B's results carry no blockers or subtasks of A's.
+    const [found] = (await searchTasks(b, query({}), TODAY)).tasks;
+    expect(found).toMatchObject({ id: bTask.id, blockers: [], subtasks: [] });
   });
 });
 

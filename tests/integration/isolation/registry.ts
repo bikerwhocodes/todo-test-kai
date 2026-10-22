@@ -262,6 +262,9 @@ export const PAGE_COVERAGE = {
     cases: "Another user's project id is a 404; own page shows only own data, blockers and picker options.",
   },
   "src/app/(app)/projects/archived/page.tsx": { cases: "Lists only the caller's archived projects." },
+  "src/app/(app)/search/page.tsx": {
+    cases: "Searches only the caller's tasks and offers only the caller's projects; another user's project id matches nothing and isn't echoed back.",
+  },
 } as const satisfies Record<string, FileCoverage>;
 
 type CoveredKeys<T> = { [K in keyof T]: T[K] extends { cases: string } ? K : never }[keyof T];
