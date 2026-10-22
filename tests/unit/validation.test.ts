@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  blockerInput,
   createProjectInput,
   createTaskInput,
   renameProjectInput,
@@ -117,6 +118,26 @@ describe("updateSubtaskInput", () => {
 
   it("rejects a blank title", () => {
     expect(updateSubtaskInput.safeParse({ id: ID, title: " " }).success).toBe(false);
+  });
+});
+
+describe("blockerInput", () => {
+  const OTHER = "1c9e6a4f-5b6c-4d7e-9f0a-1b2c3d4e5f60";
+
+  it("takes two task ids and drops anything else", () => {
+    expect(blockerInput.parse({ taskId: ID, blockedByTaskId: OTHER, userId: "u" })).toEqual({
+      taskId: ID,
+      blockedByTaskId: OTHER,
+    });
+  });
+
+  it("lets a self-link through so the server can answer with the loop message", () => {
+    expect(blockerInput.safeParse({ taskId: ID, blockedByTaskId: ID }).success).toBe(true);
+  });
+
+  it("rejects missing or non-uuid ids", () => {
+    expect(blockerInput.safeParse({ taskId: ID }).success).toBe(false);
+    expect(blockerInput.safeParse({ taskId: "nope", blockedByTaskId: OTHER }).success).toBe(false);
   });
 });
 

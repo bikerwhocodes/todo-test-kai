@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import type { Subtask, Task } from "@/server/db/schema";
+import * as dependenciesRepo from "@/server/repo/dependencies";
 import * as subtasksRepo from "@/server/repo/subtasks";
 import * as tasksRepo from "@/server/repo/tasks";
 import { requireUser } from "@/server/session";
 import {
   addSubtaskInput,
+  blockerInput,
   createTaskInput,
   setTaskCompletedInput,
   subtaskIdInput,
@@ -80,6 +82,23 @@ export async function deleteSubtaskAction(input: unknown): Promise<ActionResult>
   const user = await requireUser();
   return runAction(subtaskIdInput, input, async ({ id }) => {
     await subtasksRepo.deleteSubtask(user.id, id);
+    refresh();
+  });
+}
+
+/** Makes taskId wait on blockedByTaskId. Refuses, saving nothing, if that would close a loop. */
+export async function addBlockerAction(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  return runAction(blockerInput, input, async ({ taskId, blockedByTaskId }) => {
+    await dependenciesRepo.addBlocker(user.id, taskId, blockedByTaskId);
+    refresh();
+  });
+}
+
+export async function removeBlockerAction(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  return runAction(blockerInput, input, async ({ taskId, blockedByTaskId }) => {
+    await dependenciesRepo.removeBlocker(user.id, taskId, blockedByTaskId);
     refresh();
   });
 }

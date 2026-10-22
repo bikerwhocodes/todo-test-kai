@@ -1,16 +1,18 @@
 import { TaskRow } from "./task-row";
-import type { ProjectOption, TaskView } from "./types";
+import type { ProjectOption, TaskOption, TaskView } from "./types";
 
 export function TaskList({
   open,
   done,
   projects,
+  taskOptions,
   today,
   emptyText,
 }: {
   open: TaskView[];
   done: TaskView[];
   projects: ProjectOption[];
+  taskOptions: TaskOption[];
   today: string;
   emptyText: string;
 }) {
@@ -19,7 +21,7 @@ export function TaskList({
       {open.length > 0 ? (
         <ul aria-label="Open tasks">
           {open.map((task) => (
-            <TaskRow key={task.id} task={task} projects={projects} today={today} />
+            <TaskRow key={task.id} task={task} projects={projects} taskOptions={taskOptions} today={today} />
           ))}
         </ul>
       ) : (
@@ -33,7 +35,7 @@ export function TaskList({
           </summary>
           <ul aria-label="Completed tasks" className="mt-2">
             {done.map((task) => (
-              <TaskRow key={task.id} task={task} projects={projects} today={today} />
+              <TaskRow key={task.id} task={task} projects={projects} taskOptions={taskOptions} today={today} />
             ))}
           </ul>
         </details>

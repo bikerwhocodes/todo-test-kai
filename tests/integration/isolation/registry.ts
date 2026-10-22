@@ -30,6 +30,7 @@ export const USER_OWNED_TABLES: Record<string, { ownerColumn: string }> = {
   projects: { ownerColumn: "user_id" },
   tasks: { ownerColumn: "user_id" },
   subtasks: { ownerColumn: "user_id" },
+  task_dependencies: { ownerColumn: "user_id" },
 };
 
 /** Public tables that belong to no user, with the reason. */
@@ -151,6 +152,60 @@ export const ACTION_COVERAGE: Record<ActionName, ActionCoverage> = {
   deleteSubtaskAction: {
     cases: [{ name: "delete A's subtask", input: (w) => ({ id: w.a.subtask.id }), error: "Subtask not found" }],
   },
+  addBlockerAction: {
+    cases: [
+      {
+        name: "make A's task wait on another of A's tasks",
+        input: (w) => ({ taskId: w.a.inboxTask.id, blockedByTaskId: w.a.completedTask.id }),
+        error: "Task not found",
+      },
+      // Ownership is checked before the cycle check, so B can't learn A's graph from a loop message.
+      {
+        name: "close a loop in A's graph",
+        input: (w) => ({ taskId: w.a.inboxTask.id, blockedByTaskId: w.a.projectTask.id }),
+        error: "Task not found",
+      },
+      {
+        name: "re-add A's existing link",
+        input: (w) => ({ taskId: w.a.projectTask.id, blockedByTaskId: w.a.inboxTask.id }),
+        error: "Task not found",
+      },
+      {
+        name: "make A's task wait on itself",
+        input: (w) => ({ taskId: w.a.inboxTask.id, blockedByTaskId: w.a.inboxTask.id }),
+        error: "Task not found",
+      },
+      {
+        name: "make B's own task wait on A's task",
+        input: (w) => ({ taskId: w.b.inboxTask.id, blockedByTaskId: w.a.inboxTask.id }),
+        error: "Task not found",
+      },
+      {
+        name: "make A's task wait on B's own task",
+        input: (w) => ({ taskId: w.a.inboxTask.id, blockedByTaskId: w.b.inboxTask.id }),
+        error: "Task not found",
+      },
+    ],
+  },
+  removeBlockerAction: {
+    cases: [
+      {
+        name: "remove A's link",
+        input: (w) => ({ taskId: w.a.projectTask.id, blockedByTaskId: w.a.inboxTask.id }),
+        error: "Task not found",
+      },
+      {
+        name: "remove a link between B's task and A's task",
+        input: (w) => ({ taskId: w.b.projectTask.id, blockedByTaskId: w.a.inboxTask.id }),
+        error: "Task not found",
+      },
+      {
+        name: "remove a link between A's task and B's task",
+        input: (w) => ({ taskId: w.a.projectTask.id, blockedByTaskId: w.b.inboxTask.id }),
+        error: "Task not found",
+      },
+    ],
+  },
 
   // src/server/actions/projects.ts
   createProjectAction: {
@@ -200,8 +255,12 @@ export const PAGE_COVERAGE = {
   "src/app/(auth)/signup/page.tsx": { exempt: "Signed-out form; reads no data." },
   "src/app/(app)/layout.tsx": { cases: "Nav lists only the caller's projects and email." },
   "src/app/(app)/today/page.tsx": { cases: "Shows the caller's own time zone." },
-  "src/app/(app)/inbox/page.tsx": { cases: "Lists only the caller's inbox tasks and projects." },
-  "src/app/(app)/projects/[id]/page.tsx": { cases: "Another user's project id is a 404; own page shows only own data." },
+  "src/app/(app)/inbox/page.tsx": {
+    cases: "Lists only the caller's inbox tasks, their blockers, and the caller's projects and open tasks to pick from.",
+  },
+  "src/app/(app)/projects/[id]/page.tsx": {
+    cases: "Another user's project id is a 404; own page shows only own data, blockers and picker options.",
+  },
   "src/app/(app)/projects/archived/page.tsx": { cases: "Lists only the caller's archived projects." },
 } as const satisfies Record<string, FileCoverage>;
 

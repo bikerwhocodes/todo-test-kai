@@ -65,11 +65,18 @@ describe("B calling actions with A's ids gets not-found and changes nothing", ()
     expect(await actions.deleteSubtaskAction({ id: missing })).toEqual(
       await actions.deleteSubtaskAction({ id: w.a.subtask.id }),
     );
+    // Even where A's ids would close a loop, B gets the same answer as for a missing id.
+    expect(await actions.addBlockerAction({ taskId: missing, blockedByTaskId: w.b.inboxTask.id })).toEqual(
+      await actions.addBlockerAction({ taskId: w.a.inboxTask.id, blockedByTaskId: w.a.projectTask.id }),
+    );
+    expect(await actions.removeBlockerAction({ taskId: missing, blockedByTaskId: w.b.inboxTask.id })).toEqual(
+      await actions.removeBlockerAction({ taskId: w.a.projectTask.id, blockedByTaskId: w.a.inboxTask.id }),
+    );
   });
 });
 
 describe("actions that take no ids touch only the caller's data", () => {
-  it("createTaskAction and createProjectAction ignore a smuggled userId", async () => {
+  it("createTaskAction, createProjectAction, updateTaskAction and addBlockerAction ignore a smuggled userId", async () => {
     const aBefore = await snapshotOf(w.a.id);
 
     const project = await actions.createProjectAction({ name: "mine", userId: w.a.id });
@@ -78,6 +85,13 @@ describe("actions that take no ids touch only the caller's data", () => {
     expect(task).toMatchObject({ ok: true, data: { userId: w.b.id, projectId: null } });
     const updated = await actions.updateTaskAction({ id: w.b.inboxTask.id, title: "still mine", userId: w.a.id });
     expect(updated).toMatchObject({ ok: true, data: { userId: w.b.id, title: "still mine" } });
+    const linked = await actions.addBlockerAction({
+      taskId: w.b.inboxTask.id,
+      blockedByTaskId: w.b.completedTask.id,
+      userId: w.a.id,
+    });
+    expect(linked).toEqual({ ok: true, data: undefined });
+    expect((await snapshotOf(w.b.id)).task_dependencies).toHaveLength(2);
 
     expect(await snapshotOf(w.a.id)).toEqual(aBefore);
   });

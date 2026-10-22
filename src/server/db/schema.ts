@@ -8,6 +8,7 @@ import {
   index,
   integer,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -201,6 +202,40 @@ export const subtasks = pgTable(
   ],
 );
 
+// "task_id is blocked by blocked_by_task_id". Both ends go through composite
+// (user_id, id) foreign keys, so an edge can only join two tasks of the same user,
+// and deleting either task deletes the edge. Whether a task is blocked is derived
+// from its blockers' status when read (see core/graph blockedSet), never stored.
+export const taskDependencies = pgTable(
+  "task_dependencies",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").notNull(),
+    blockedByTaskId: uuid("blocked_by_task_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.blockedByTaskId] }),
+    foreignKey({
+      name: "task_dependencies_user_task_fk",
+      columns: [t.userId, t.taskId],
+      foreignColumns: [tasks.userId, tasks.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "task_dependencies_user_blocked_by_fk",
+      columns: [t.userId, t.blockedByTaskId],
+      foreignColumns: [tasks.userId, tasks.id],
+    }).onDelete("cascade"),
+    // The cycle check loads all of a user's edges; deletes cascade from the blocker side.
+    index("task_dependencies_user_id_idx").on(t.userId),
+    index("task_dependencies_blocked_by_task_id_idx").on(t.blockedByTaskId),
+    check("task_dependencies_not_self", sql`${t.taskId} <> ${t.blockedByTaskId}`),
+  ],
+);
+
 export type Project = typeof projects.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type Subtask = typeof subtasks.$inferSelect;
+export type TaskDependency = typeof taskDependencies.$inferSelect;

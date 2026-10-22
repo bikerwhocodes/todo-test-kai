@@ -51,7 +51,8 @@ const PAGE_CASES: FileCases<CoveredPage> = {
       async ({ a, b }) => {
         const tree = await InboxPage();
         expectNoneOf(a, tree);
-        expectSomeOf(b, tree, b.inboxTask.title, b.completedTask.title, b.project.name);
+        // b.projectTask is not in the Inbox; it shows up only as an option in the "Blocked by" picker.
+        expectSomeOf(b, tree, b.inboxTask.title, b.completedTask.title, b.project.name, b.projectTask.title);
       },
     ],
   ],
@@ -70,7 +71,8 @@ const PAGE_CASES: FileCases<CoveredPage> = {
       async ({ a, b }) => {
         const tree = await ProjectPage(params(b.project.id));
         expectNoneOf(a, tree);
-        expectSomeOf(b, tree, b.projectTask.title, b.subtask.title, b.project.name);
+        // b.inboxTask appears as projectTask's blocker (and as a picker option).
+        expectSomeOf(b, tree, b.projectTask.title, b.subtask.title, b.project.name, b.inboxTask.title);
         const archived = await ProjectPage(params(b.archivedProject.id));
         expectNoneOf(a, archived);
         expectSomeOf(b, archived, b.archivedProjectTask.title);

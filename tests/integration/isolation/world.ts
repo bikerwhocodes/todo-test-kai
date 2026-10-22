@@ -1,7 +1,8 @@
 import { eq, sql } from "drizzle-orm";
 import { expect } from "vitest";
 import { db } from "@/server/db";
-import { session, type Project, type Subtask, type Task } from "@/server/db/schema";
+import { session, taskDependencies, type Project, type Subtask, type Task, type TaskDependency } from "@/server/db/schema";
+import { addBlocker } from "@/server/repo/dependencies";
 import { createProject, setProjectArchived } from "@/server/repo/projects";
 import { addSubtask } from "@/server/repo/subtasks";
 import { createTask, setTaskCompleted, updateTask } from "@/server/repo/tasks";
@@ -25,6 +26,8 @@ export type Account = SignedUp & {
   completedTask: Task;
   archivedProjectTask: Task;
   subtask: Subtask;
+  /** projectTask is blocked by inboxTask (both open, so projectTask shows "Waiting on"). */
+  dependency: TaskDependency;
 };
 
 export type World = { a: Account; b: Account };
@@ -64,6 +67,9 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
   let completedTask = await createTask(user.id, { title: `${marker} completed task` });
   completedTask = await setTaskCompleted(user.id, completedTask.id, true);
   const subtask = await addSubtask(user.id, projectTask.id, `${marker} subtask`);
+  await addBlocker(user.id, projectTask.id, inboxTask.id);
+  const [dependency] = await db.select().from(taskDependencies).where(eq(taskDependencies.userId, user.id));
+  if (!dependency) throw new Error(`no task_dependencies row for ${slug}`);
 
   return {
     ...user,
@@ -77,6 +83,7 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
     completedTask,
     archivedProjectTask,
     subtask,
+    dependency,
   };
 }
 
