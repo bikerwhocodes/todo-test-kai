@@ -20,9 +20,10 @@ import {
   setTaskCompleted,
   updateTask,
 } from "@/server/repo/tasks";
-import { FK_VIOLATION, createUser, expectPgError, resetDb } from "./helpers";
+import { FK_VIOLATION, createUser, expectPgError, resetDb } from "../helpers";
 
-// User B must never read or change anything of user A's, through the repo or the database.
+// Repo layer: user B must never read or change anything of user A's, through the repo or the database.
+// The action, page and route layers are covered next to this file (see ./registry.ts).
 
 let a: string;
 let b: string;

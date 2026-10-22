@@ -20,6 +20,7 @@ pnpm dev
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm test` | Unit tests (no database) |
 | `pnpm test:integration` | Integration tests against `TEST_DATABASE_URL` (migrated and truncated) |
+| `pnpm test:isolation` | Just the account isolation suite (`tests/integration/isolation`) |
 | `pnpm db:generate` | Generate a SQL migration from `src/server/db/schema.ts` |
 | `pnpm db:migrate` | Apply migrations in `drizzle/` |
 
@@ -57,6 +58,29 @@ pnpm dev
 - Server actions (`src/server/actions/{tasks,projects}.ts`) take `unknown`, validate with the
   zod schemas in `src/lib/validation.ts` and return `{ ok, data } | { ok: false, error }`.
   For optional task fields, `null` clears the value and an omitted key leaves it unchanged.
+
+## Account isolation
+
+One account must never read or change another's data. `tests/integration/isolation/` proves it
+with two real signed-up users, A and B, who each own one of everything (`world.ts`):
+
+- `actions.test.ts` signs in as B and calls every server action with A's ids (task, project and
+  subtask ids, and B's own task aimed at A's project). Each must return exactly
+  `{ ok: false, error: "<Entity> not found" }`, the same answer as for an id that doesn't exist,
+  and leave a snapshot of every row A owns, in every user-owned table, byte-identical.
+- `pages.test.ts` calls each app page and layout as B: A's ids are a 404, and nothing of A's
+  (ids, names, email, time zone) appears in what the page passes to its components.
+- `routes.test.ts` calls each route handler as B (today the Better Auth endpoints).
+- `repo.test.ts` covers `src/server/repo/*` and the composite foreign keys.
+- `coverage.test.ts` fails the build when something isn't in `registry.ts`: a table in the
+  database or Drizzle schema, a `user_id` table not in `USER_OWNED_TABLES`, an exported server
+  action, a `route.ts`, or a page/layout. The failure says what to add and where.
+
+**Definition of done:** a story that adds a user-owned table, server action, route handler or
+page registers it in `tests/integration/isolation/registry.ts` with cross-user cases (or an
+exemption saying why it can't reach user data) and seeds new tables in `world.ts`. CI runs the
+suite as its own "Account isolation suite" step. Later epics (dependencies, series, plans) extend
+the same registry.
 
 ## Known gaps
 

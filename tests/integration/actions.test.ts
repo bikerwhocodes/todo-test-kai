@@ -1,45 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ headers: new Headers(), revalidatePath: vi.fn() }));
-
-vi.mock("next/headers", () => ({
-  headers: async () => state.headers,
-  // Better Auth's nextCookies() plugin mirrors Set-Cookie into next/headers; ignore it here.
-  cookies: async () => ({ get: () => undefined, getAll: () => [], has: () => false, set: () => {}, delete: () => {} }),
+// Hoisted above the imports below; see ./next-mocks.
+vi.mock("next/headers", async () => (await import("./next-mocks")).nextHeaders);
+vi.mock("next/navigation", async (orig) => ({
+  ...(await orig<object>()),
+  ...(await import("./next-mocks")).nextNavigation,
 }));
-vi.mock("next/navigation", () => ({
-  redirect: (to: string) => {
-    throw new Error(`REDIRECT:${to}`);
-  },
-}));
-vi.mock("next/cache", () => ({ revalidatePath: state.revalidatePath }));
-// React's cache() is a no-op outside a server render; keep it transparent.
-vi.mock("react", async (orig) => ({ ...(await orig<typeof import("react")>()), cache: <T>(fn: T) => fn }));
+vi.mock("next/cache", async () => (await import("./next-mocks")).nextCache);
+vi.mock("react", async (orig) => ({ ...(await orig<object>()), ...(await import("./next-mocks")).reactCache }));
 
-const { auth } = await import("@/server/auth");
-const { createTaskAction, setTaskCompletedAction, updateTaskAction, deleteTaskAction } = await import(
-  "@/server/actions/tasks"
-);
-const { createProjectAction } = await import("@/server/actions/projects");
-const tasksRepo = await import("@/server/repo/tasks");
-const { createUser, resetDb } = await import("./helpers");
-
-/** Signs a user up and makes their session cookie the current request's. Returns their id. */
-async function signIn(email: string): Promise<string> {
-  const res = await auth.api.signUpEmail({
-    body: { name: "Test User", email, password: "correct horse battery" },
-    asResponse: true,
-  });
-  const cookie = res.headers.getSetCookie().find((c) => c.includes("better-auth.session_token="))!;
-  state.headers = new Headers({ cookie: cookie.split(";")[0]! });
-  const { user } = (await res.json()) as { user: { id: string } };
-  return user.id;
-}
+import { createTaskAction, setTaskCompletedAction, updateTaskAction, deleteTaskAction } from "@/server/actions/tasks";
+import { createProjectAction } from "@/server/actions/projects";
+import * as tasksRepo from "@/server/repo/tasks";
+import { createUser, resetDb } from "./helpers";
+import { actAs, revalidatePath } from "./next-mocks";
+import { signIn } from "./session-helpers";
 
 beforeEach(async () => {
   await resetDb();
-  state.headers = new Headers();
-  state.revalidatePath.mockClear();
+  actAs(null);
+  revalidatePath.mockClear();
 });
 
 describe("task actions", () => {
@@ -49,7 +29,7 @@ describe("task actions", () => {
     const result = await createTaskAction({ title: "  Buy milk " });
 
     expect(result).toMatchObject({ ok: true, data: { title: "Buy milk", projectId: null, userId } });
-    expect(state.revalidatePath).toHaveBeenCalled();
+    expect(revalidatePath).toHaveBeenCalled();
     const inbox = await tasksRepo.listInboxTasks(userId);
     expect(inbox.open.map((t) => t.title)).toEqual(["Buy milk"]);
   });
@@ -75,7 +55,7 @@ describe("task actions", () => {
     expect(await updateTaskAction({ id: "nope" })).toMatchObject({ ok: false, fieldErrors: { id: expect.any(Array) } });
 
     expect((await tasksRepo.listInboxTasks(userId)).open).toHaveLength(1);
-    expect(state.revalidatePath).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it("updateTaskAction sets and then clears optional fields with null", async () => {
