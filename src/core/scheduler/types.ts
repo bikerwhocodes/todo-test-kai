@@ -68,6 +68,66 @@ export interface RankedCandidate {
   readonly reasons: ReadonlyArray<Reason>;
 }
 
+export interface SuggestPlanInput extends CandidateInput {
+  /** Minutes the user has today, as entered in Plan My Day. Must be finite and >= 0. */
+  readonly availableMin: number;
+}
+
+/** A pick for today's plan. `reasons` may end with FITS_REMAINING. */
+export interface Suggestion extends RankedCandidate {
+  /** 1-based position in the full ranking. */
+  readonly rank: number;
+}
+
+/**
+ * Why a candidate was left out for its size.
+ * - TOO_LARGE: needs more than all of the time available after the existing plan ("split it").
+ * - NO_ROOM_LEFT: would fit on its own, but higher-ranked picks used the time first.
+ */
+export type SizeReason =
+  | { readonly code: "TOO_LARGE"; readonly needMin: number; readonly availableMin: number }
+  | { readonly code: "NO_ROOM_LEFT"; readonly needMin: number; readonly remainingMin: number };
+
+export interface DidntFit extends RankedCandidate {
+  readonly rank: number;
+  readonly size: SizeReason;
+}
+
+export interface PlanTotals {
+  /** As passed in. */
+  readonly availableMin: number;
+  /** Effective minutes of open tasks already in today's plan. */
+  readonly existingMin: number;
+  readonly existingCount: number;
+  /** Effective minutes of the new suggestions. */
+  readonly suggestedMin: number;
+  readonly suggestedCount: number;
+  /** existingMin + suggestedMin. Can exceed availableMin only when the existing plan already did. */
+  readonly plannedMin: number;
+  /** max(0, availableMin − plannedMin). */
+  readonly remainingMin: number;
+  /** Existing plan minutes beyond availableMin; 0 when within. */
+  readonly overMin: number;
+  /** Planned items (existing + suggested) that use the default estimate. */
+  readonly assumedCount: number;
+}
+
+/** The result of `suggestPlan`. Nothing is saved; the user reviews and accepts it. */
+export interface Draft {
+  /** In rank order. Never includes tasks already in the plan. */
+  readonly suggestions: ReadonlyArray<Suggestion>;
+  /** Oversized urgent or top-ranked candidates, in rank order. */
+  readonly didntFit: ReadonlyArray<DidntFit>;
+  /**
+   * Set when there are candidates but none fits: the shortest ones (shortest
+   * first, then rank order) so the UI can say "Your shortest tasks need …".
+   */
+  readonly nothingFits: { readonly shortest: ReadonlyArray<DidntFit> } | null;
+  readonly totals: PlanTotals;
+  /** From the candidate filter, in input order. */
+  readonly excluded: CandidateResult["excluded"];
+}
+
 export interface CandidateResult {
   /** Best first; see `compareCandidates`. */
   readonly ranked: ReadonlyArray<RankedCandidate>;

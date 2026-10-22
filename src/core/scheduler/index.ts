@@ -4,15 +4,22 @@
  */
 
 export { compareCandidates, rankCandidates, scoreTask, type ScoreContext } from "./candidates";
+export { suggestPlan } from "./fit";
 export type {
   CandidateInput,
   CandidateResult,
+  DidntFit,
+  Draft,
   ExclusionReason,
+  PlanTotals,
   Priority,
   RankedCandidate,
   Reason,
   ReasonCode,
   SchedulerTask,
+  SizeReason,
+  Suggestion,
+  SuggestPlanInput,
   TaskStatus,
 } from "./types";
 export * from "./weights";

@@ -55,6 +55,20 @@ export const UNBLOCKS_WEIGHTS = {
 export const CARRIED_OVER_POINTS = 5;
 export const RECURRING_POINTS = 0;
 export const ASSUMED_ESTIMATE_POINTS = 0;
+/** FITS_REMAINING is added by the fit step after ranking, so it never changes the order. */
+export const FITS_REMAINING_POINTS = 0;
+
+/**
+ * Greedy fit (spec §4.4). A task that is too big for the time left is listed
+ * under "didn't fit" when it is urgent (overdue 1–14 days or due today) or
+ * ranks in the top `didntFitTopRanks`. Other oversized tasks are skipped
+ * silently so a long backlog doesn't flood the panel.
+ */
+export const FIT_RULES = {
+  didntFitTopRanks: 5,
+  /** How many of the shortest candidates to offer when nothing fits. */
+  nothingFitsHints: 3,
+} as const;
 
 /** Used when the caller does not pass the user's default estimate. */
 export const FALLBACK_DEFAULT_ESTIMATE_MIN = 30;
