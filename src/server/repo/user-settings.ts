@@ -1,0 +1,26 @@
+import "server-only";
+import { eq } from "drizzle-orm";
+import { normalizeTimeZone } from "@/core/time-zone";
+import { db } from "@/server/db";
+import { userSettings, type UserSettings } from "@/server/db/schema";
+
+/** Creates the settings row for a new user; a no-op if it already exists. */
+export async function createUserSettings(userId: string, timeZone: unknown): Promise<void> {
+  await db
+    .insert(userSettings)
+    .values({ userId, timeZone: normalizeTimeZone(timeZone) })
+    .onConflictDoNothing({ target: userSettings.userId });
+}
+
+/**
+ * Settings for `userId`. If the signup hook never ran (e.g. it failed after the
+ * user row was committed) the row is created with defaults rather than erroring.
+ */
+export async function getUserSettings(userId: string): Promise<UserSettings> {
+  const existing = await db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) });
+  if (existing) return existing;
+  await createUserSettings(userId, undefined);
+  const created = await db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) });
+  if (!created) throw new Error(`user_settings missing for user ${userId}`);
+  return created;
+}
