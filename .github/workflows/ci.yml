@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nextup_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/nextup_test
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/nextup_test
+      BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_SECRET: ci-only-secret-ci-only-secret-ci-only-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # TODO: switch to --frozen-lockfile once pnpm-lock.yaml is committed.
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      # Cross-account checks (tests/integration/isolation) get their own step so a failure is
+      # visibly an isolation failure; the next step runs every other integration test.
+      - name: Account isolation suite
+        run: pnpm test:isolation
+      - name: Integration tests
+        run: pnpm test:integration --exclude "tests/integration/isolation/**"
+      - run: pnpm build
