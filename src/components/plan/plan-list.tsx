@@ -65,6 +65,8 @@ export function PlanList({
           hintId={hintId}
           dropLine={lineAbove ? "above" : lineBelow ? "below" : null}
           dragging={drag?.segment === segment && drag.from === index}
+          first={index === 0}
+          last={index === rows.length - 1}
           onKeyMove={(delta) => onMove(segment, index, index + delta)}
           onRemove={() => onRemove(row.taskId)}
           onSaveEstimate={(min) => onSaveEstimate(row.taskId, min)}
@@ -116,6 +118,8 @@ function PlanRowItem({
   hintId,
   dropLine,
   dragging,
+  first,
+  last,
   onKeyMove,
   onRemove,
   onSaveEstimate,
@@ -129,6 +133,8 @@ function PlanRowItem({
   hintId: string;
   dropLine: "above" | "below" | null;
   dragging: boolean;
+  first: boolean;
+  last: boolean;
   onKeyMove: (delta: number) => void;
   onRemove: () => void;
   onSaveEstimate: (estimateMin: number | null) => Promise<string | null>;
@@ -183,9 +189,30 @@ function PlanRowItem({
           onDragStart();
         }}
         onDragEnd={onDragEnd}
-        className="flex min-h-9 w-6 shrink-0 cursor-grab items-center justify-center text-stone-400 select-none hover:text-stone-700 active:cursor-grabbing"
+        className="flex min-h-9 w-6 shrink-0 cursor-grab items-center justify-center text-stone-400 select-none hover:text-stone-700 active:cursor-grabbing pointer-coarse:hidden"
       >
         ⠿
+      </span>
+      {/* Touch screens can't drag natively (and have no Alt+arrows): move buttons instead. */}
+      <span className="hidden shrink-0 flex-col pointer-coarse:flex">
+        <button
+          type="button"
+          onClick={() => onKeyMove(-1)}
+          disabled={first}
+          aria-label={`Move ${row.title} up`}
+          className={`flex h-9 w-9 items-center justify-center rounded-md text-stone-500 disabled:opacity-30 ${focusRingClass}`}
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          onClick={() => onKeyMove(1)}
+          disabled={last}
+          aria-label={`Move ${row.title} down`}
+          className={`flex h-9 w-9 items-center justify-center rounded-md text-stone-500 disabled:opacity-30 ${focusRingClass}`}
+        >
+          ↓
+        </button>
       </span>
       <div className="min-w-0 flex-1 py-1">
         <p className={`text-sm break-words ${row.done ? "text-stone-500 line-through" : "text-stone-900"}`}>

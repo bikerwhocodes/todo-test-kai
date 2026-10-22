@@ -56,7 +56,7 @@ pnpm dev
 - Data access lives in `src/server/repo/*`: every function takes `userId` first and scopes
   every query by it. Another user's rows behave exactly like missing ones (`NotFoundError`).
 - **Upcoming** (`/upcoming`) shows open tasks with a deadline. An Overdue group comes first, then one group for each
-  date from today through today + 13. **Today** has a Plan section, which stays empty until Plan My Day ships, and a
+  date from today through today + 13. **Today** has a Plan section (today's plan in order, with a "Plan my day" button that opens the panel) and a
   "Due today & overdue, not in plan" section. "Today" is the date in the user's profile zone
   (`user_settings.time_zone`). Deadlines are compared only as dates (`src/core/agenda.ts`,
   `src/server/repo/agenda.ts`).
@@ -174,7 +174,7 @@ also hides it from today's suggestions. "Add N to plan" saves the draft; "Cancel
 
 `↑` / `↓` and `Enter` pick from the "Add a task" matches. `Esc` first cancels an estimate edit or clears the
 search, otherwise it closes the panel and returns focus to the button that opened it. `Ctrl`/`⌘`+`Enter` accepts. Rows can also be
-dragged by their ⠿ handle.
+dragged by their ⠿ handle; on touch screens, where native drag doesn't work, each row has ↑/↓ buttons instead.
 
 ## Account isolation
 
