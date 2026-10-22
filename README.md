@@ -59,6 +59,22 @@ pnpm dev
   zod schemas in `src/lib/validation.ts` and return `{ ok, data } | { ok: false, error }`.
   For optional task fields, `null` clears the value and an omitted key leaves it unchanged.
 
+## Dependencies ("Blocked by")
+
+- Table `task_dependencies` (`drizzle/0002_task_dependencies.sql`): a row
+  `(user_id, task_id, blocked_by_task_id)` means "task waits on blocked_by". Both ends are
+  composite `(user_id, id)` foreign keys into `tasks` with `ON DELETE CASCADE`, so an edge can
+  only join two tasks of the same user and disappears with either task. A CHECK forbids self-edges.
+- Blocked-ness is derived, never stored: a task is blocked iff any direct blocker is `open`
+  (`blockedSet` in `src/core/graph`). Completing the blocker unblocks it; reopening blocks it again.
+- `addBlockerAction` runs in one transaction: a per-user advisory lock
+  (`pg_advisory_xact_lock(ns, hashtext(user_id))`), then both tasks are checked to be the
+  caller's (and `FOR KEY SHARE`-locked), then the user's edges are loaded and
+  `wouldCreateCycle` decides. A loop is refused with a message naming it ("That would create a
+  loop: "A" waits on "B", which waits on "A".") and nothing is saved. Adding an existing link
+  and removing a missing one are no-ops.
+- List views load every listed task's blockers in one query.
+
 ## Account isolation
 
 One account must never read or change another's data. `tests/integration/isolation/` proves it
@@ -84,7 +100,7 @@ the same registry.
 
 ## Known gaps
 
-- `drizzle/0000_auth.sql` and `drizzle/0001_tasks_projects.sql` were written by hand (no
+- `drizzle/0000_auth.sql`, `drizzle/0001_tasks_projects.sql` and `drizzle/0002_task_dependencies.sql` were written by hand (no
   registry access when they were created) and the `drizzle/meta/*_snapshot.json` files are
   missing. Before the next schema change, run
   `pnpm db:generate` once on a clean checkout, check it matches the hand-written migrations, and

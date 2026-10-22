@@ -1,10 +1,10 @@
 "use client";
 
 import { useId, useOptimistic, useRef, useState, useTransition } from "react";
-import { formatDeadline, formatEstimate, formatPriority } from "@/core/format";
+import { formatDeadline, formatEstimate, formatPriority, formatWaitingOn } from "@/core/format";
 import { setTaskCompletedAction } from "@/server/actions/tasks";
 import { TaskEditor } from "./task-editor";
-import type { ProjectOption, TaskView } from "./types";
+import type { BlockerView, ProjectOption, TaskOption, TaskView } from "./types";
 
 const PRIORITY_CHIP: Record<number, string> = {
   1: "bg-red-50 text-red-800",
@@ -12,7 +12,17 @@ const PRIORITY_CHIP: Record<number, string> = {
   3: "bg-sky-50 text-sky-800",
 };
 
-export function TaskRow({ task, projects, today }: { task: TaskView; projects: ProjectOption[]; today: string }) {
+export function TaskRow({
+  task,
+  projects,
+  taskOptions,
+  today,
+}: {
+  task: TaskView;
+  projects: ProjectOption[];
+  taskOptions: TaskOption[];
+  today: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [done, setDone] = useOptimistic(task.done);
   const [, startTransition] = useTransition();
@@ -64,7 +74,7 @@ export function TaskRow({ task, projects, today }: { task: TaskView; projects: P
       )}
       {expanded && (
         <div id={editorId} className="mb-3 ml-7">
-          <TaskEditor task={task} projects={projects} onClose={closeEditor} />
+          <TaskEditor task={task} projects={projects} taskOptions={taskOptions} onClose={closeEditor} />
         </div>
       )}
     </li>
@@ -77,6 +87,10 @@ function TaskMeta({ task, done, today }: { task: TaskView; done: boolean; today:
   const overdue = !done && task.deadline !== null && task.deadline < today;
   const chips: React.ReactNode[] = [];
 
+  // Only open tasks are badged; a completed task isn't waiting on anything.
+  if (!done && task.blocked) {
+    chips.push(<WaitingOnBadge key="b" waitingOn={task.blockers.filter((b) => b.open)} />);
+  }
   if (priority) {
     chips.push(
       <span key="p" className={`rounded px-1.5 ${PRIORITY_CHIP[task.priority]}`}>
@@ -118,4 +132,20 @@ function TaskMeta({ task, done, today }: { task: TaskView; done: boolean; today:
   }
   if (chips.length === 0) return null;
   return <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500">{chips}</span>;
+}
+
+/** Lock badge: "Waiting on <title>" or "Waiting on <title> and N more". */
+function WaitingOnBadge({ waitingOn }: { waitingOn: BlockerView[] }) {
+  const label = formatWaitingOn(waitingOn.map((b) => b.title));
+  return (
+    <span
+      title={waitingOn.length > 1 ? `Waiting on ${waitingOn.map((b) => b.title).join(", ")}` : label}
+      className="inline-flex max-w-full items-center gap-1 rounded bg-amber-50 px-1.5 text-amber-900"
+    >
+      <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" className="size-3 shrink-0">
+        <path d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H4a1.5 1.5 0 0 0-1.5 1.5v6A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5v-6A1.5 1.5 0 0 0 12 6h-.5V4.5A3.5 3.5 0 0 0 8 1Zm2 5V4.5a2 2 0 1 0-4 0V6h4Z" />
+      </svg>
+      <span className="truncate">{label}</span>
+    </span>
+  );
 }

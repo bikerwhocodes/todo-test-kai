@@ -60,6 +60,9 @@ export const updateSubtaskInput = z.object({
 });
 export const subtaskIdInput = z.object({ id });
 
+/** "taskId is blocked by blockedByTaskId"; used to add and to remove the link. */
+export const blockerInput = z.object({ taskId: id, blockedByTaskId: id });
+
 export const createProjectInput = z.object({ name: projectName });
 export const renameProjectInput = z.object({ id, name: projectName });
 export const setProjectArchivedInput = z.object({ id, archived: z.boolean() });

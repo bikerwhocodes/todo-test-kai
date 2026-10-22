@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   blockedSet,
+  cyclePath,
   wouldCreateCycle,
   type DependencyEdge,
   type GraphTask,
@@ -56,6 +57,57 @@ describe("wouldCreateCycle", () => {
     const input = Object.freeze(edges("a<b", "b<c").map((x) => Object.freeze(x)));
     expect(() => wouldCreateCycle(input, "c", "a")).not.toThrow();
     expect(input).toEqual(edges("a<b", "b<c"));
+  });
+});
+
+describe("cyclePath", () => {
+  const cases: Array<{ name: string; existing: string[]; add: string; expected: string[] | null }> = [
+    { name: "self-edge", existing: ["a<b"], add: "a<a", expected: ["a", "a"] },
+    { name: "2-cycle", existing: ["a<b"], add: "b<a", expected: ["b", "a", "b"] },
+    { name: "3-cycle", existing: ["a<b", "b<c"], add: "c<a", expected: ["c", "a", "b", "c"] },
+    {
+      name: "shortest loop when there are several",
+      existing: ["a<b", "b<c", "c<d", "a<d"],
+      add: "d<a",
+      expected: ["d", "a", "d"],
+    },
+    { name: "loop through a branch", existing: ["a<x", "a<b", "b<z"], add: "z<a", expected: ["z", "a", "b", "z"] },
+    { name: "no cycle", existing: ["a<b", "b<c"], add: "a<c", expected: null },
+    { name: "duplicate edge", existing: ["a<b"], add: "a<b", expected: null },
+    { name: "existing cycle elsewhere does not hang", existing: ["x<y", "y<x"], add: "a<x", expected: null },
+  ];
+
+  it.each(cases)("$name: $add", ({ existing, add, expected }) => {
+    const { taskId, blockedById } = e(add);
+    expect(cyclePath(edges(...existing), taskId, blockedById)).toEqual(expected);
+  });
+
+  it("returns a real loop exactly when wouldCreateCycle says so", () => {
+    // Small random graphs (cycles allowed) so loops of many lengths come up.
+    let seed = 1;
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let round = 0; round < 300; round++) {
+      const n = 2 + Math.floor(next() * 6);
+      const id = () => `t${Math.floor(next() * n)}`;
+      const es: DependencyEdge[] = [];
+      for (let k = Math.floor(next() * 10); k > 0; k--) {
+        const taskId = id();
+        const blockedById = id();
+        if (taskId !== blockedById) es.push({ taskId, blockedById });
+      }
+      const [from, to] = [id(), id()];
+      const path = cyclePath(es, from, to);
+      expect(path !== null, JSON.stringify({ es, from, to })).toBe(wouldCreateCycle(es, from, to));
+      if (!path) continue;
+      expect(path[0]).toBe(from);
+      expect(path.at(-1)).toBe(from);
+      if (from === to) continue;
+      expect(path[1]).toBe(to);
+      // Every hop after the new edge is an existing edge.
+      for (let i = 1; i < path.length - 1; i++) {
+        expect(es.some((x) => x.taskId === path[i] && x.blockedById === path[i + 1])).toBe(true);
+      }
+    }
   });
 });
 

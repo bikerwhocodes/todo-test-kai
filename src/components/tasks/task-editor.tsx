@@ -4,8 +4,9 @@ import { useId, useState, useTransition } from "react";
 import { DESCRIPTION_MAX, ESTIMATE_MAX_MIN, NO_PRIORITY, TITLE_MAX } from "@/lib/limits";
 import { deleteTaskAction, updateTaskAction } from "@/server/actions/tasks";
 import { inputClass, labelClass, primaryButtonClass, secondaryButtonClass } from "@/components/ui";
+import { BlockerPicker } from "./blocker-picker";
 import { SubtaskChecklist } from "./subtask-checklist";
-import type { ProjectOption, TaskView } from "./types";
+import type { ProjectOption, TaskOption, TaskView } from "./types";
 
 type Draft = {
   title: string;
@@ -63,10 +64,13 @@ function buildPatch(task: TaskView, draft: Draft): { patch: Record<string, unkno
 export function TaskEditor({
   task,
   projects,
+  taskOptions,
   onClose,
 }: {
   task: TaskView;
   projects: ProjectOption[];
+  /** The user's open tasks, for the "Blocked by" picker. */
+  taskOptions: TaskOption[];
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(() => draftFrom(task));
@@ -108,7 +112,7 @@ export function TaskEditor({
   }
 
   function onDelete() {
-    if (!window.confirm(`Delete "${task.title}"? This also deletes its subtasks.`)) return;
+    if (!window.confirm(`Delete "${task.title}"? This also deletes its subtasks and its "blocked by" links.`)) return;
     setError(null);
     startTransition(async () => {
       const result = await deleteTaskAction({ id: task.id });
@@ -268,6 +272,8 @@ export function TaskEditor({
       </form>
 
       <SubtaskChecklist taskId={task.id} subtasks={task.subtasks} />
+
+      <BlockerPicker taskId={task.id} blockers={task.blockers} options={taskOptions} />
 
       <div className="flex justify-end border-t border-stone-100 pt-3">
         <button

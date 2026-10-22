@@ -1,7 +1,8 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/server/db";
-import { projects, subtasks, tasks, type Project, type Subtask, type Task } from "@/server/db/schema";
+import { projects, subtasks, taskDependencies, tasks, type Project, type Subtask, type Task } from "@/server/db/schema";
+import { addBlocker, blockersFor, removeBlocker } from "@/server/repo/dependencies";
 import { NotFoundError } from "@/server/repo/errors";
 import {
   createProject,
@@ -16,11 +17,12 @@ import {
   deleteTask,
   getTask,
   listInboxTasks,
+  listOpenTaskTitles,
   listProjectTasks,
   setTaskCompleted,
   updateTask,
 } from "@/server/repo/tasks";
-import { FK_VIOLATION, createUser, expectPgError, resetDb } from "../helpers";
+import { CHECK_VIOLATION, FK_VIOLATION, createUser, expectPgError, resetDb } from "../helpers";
 
 // Repo layer: user B must never read or change anything of user A's, through the repo or the database.
 // The action, page and route layers are covered next to this file (see ./registry.ts).
@@ -43,7 +45,11 @@ beforeEach(async () => {
   aTask = await createTask(a, { title: "Alice's task", projectId: aProject.id });
   aInboxTask = await createTask(a, { title: "Alice's inbox task" });
   aSubtask = await addSubtask(a, aTask.id, "Alice's subtask");
+  // aTask waits on aInboxTask.
+  await addBlocker(a, aTask.id, aInboxTask.id);
 });
+
+const aEdges = () => db.select().from(taskDependencies).where(eq(taskDependencies.userId, a));
 
 describe("tasks", () => {
   it("B cannot read A's tasks", async () => {
@@ -107,6 +113,46 @@ describe("subtasks", () => {
   });
 });
 
+describe("task dependencies", () => {
+  it("B cannot read A's blockers or pick A's tasks", async () => {
+    expect(await blockersFor(b, [aTask.id, aInboxTask.id])).toEqual(new Map());
+    expect(await listOpenTaskTitles(b)).toEqual([]);
+    // Positive control: A sees the link.
+    expect((await getTask(a, aTask.id))!.blockers.map((x) => x.id)).toEqual([aInboxTask.id]);
+  });
+
+  it("B cannot add or remove links on A's tasks, even ones that would close A's loop", async () => {
+    const before = await aEdges();
+    const bTask = await createTask(b, { title: "Bob's task" });
+
+    for (const [taskId, blockedBy] of [
+      [aInboxTask.id, aTask.id], // would close A's loop: must still be "not found"
+      [aTask.id, aInboxTask.id], // A's existing link
+      [aInboxTask.id, aInboxTask.id],
+      [bTask.id, aTask.id],
+      [aTask.id, bTask.id],
+    ] as const) {
+      await expect(addBlocker(b, taskId, blockedBy), `add ${taskId} < ${blockedBy}`).rejects.toMatchObject({
+        name: "NotFoundError",
+        entity: "task",
+      });
+    }
+    await expect(removeBlocker(b, aTask.id, aInboxTask.id)).rejects.toMatchObject({ entity: "task" });
+    await expect(removeBlocker(b, bTask.id, aInboxTask.id)).rejects.toMatchObject({ entity: "task" });
+
+    expect(await aEdges()).toEqual(before);
+    expect(await db.select().from(taskDependencies).where(eq(taskDependencies.userId, b))).toEqual([]);
+  });
+
+  it("A's lists show A's blockers; B's lists show none of them", async () => {
+    expect((await listProjectTasks(a, aProject.id)).open[0]!.blockers).toEqual([
+      { id: aInboxTask.id, title: "Alice's inbox task", status: "open" },
+    ]);
+    const bTask = await createTask(b, { title: "Bob's task" });
+    expect((await listInboxTasks(b)).open.map((t) => [t.id, t.blockers])).toEqual([[bTask.id, []]]);
+  });
+});
+
 describe("projects", () => {
   it("B cannot see, rename or archive A's project", async () => {
     const before = await rowOf(projects, aProject.id);
@@ -140,6 +186,52 @@ describe("database constraints", () => {
 
   it("refuse a subtask owned by B under A's task", async () => {
     await expectPgError(db.insert(subtasks).values({ userId: b, taskId: aTask.id, title: "x" }), FK_VIOLATION);
+  });
+
+  it("refuse a dependency that joins two users' tasks, whoever owns the row", async () => {
+    const bTask = await createTask(b, { title: "Bob's task" });
+    const bOther = await createTask(b, { title: "Bob's other task" });
+    const cases = [
+      { userId: b, taskId: bTask.id, blockedByTaskId: aTask.id },
+      { userId: b, taskId: aTask.id, blockedByTaskId: bTask.id },
+      { userId: a, taskId: aTask.id, blockedByTaskId: bTask.id },
+      { userId: a, taskId: bTask.id, blockedByTaskId: aTask.id },
+      // Both tasks A's, row claims B (or the reverse).
+      { userId: b, taskId: aInboxTask.id, blockedByTaskId: aTask.id },
+      { userId: a, taskId: bTask.id, blockedByTaskId: bOther.id },
+    ];
+    for (const row of cases) await expectPgError(db.insert(taskDependencies).values(row), FK_VIOLATION);
+
+    // Repointing A's existing row at B's task is refused too.
+    await expectPgError(
+      db
+        .update(taskDependencies)
+        .set({ blockedByTaskId: bTask.id })
+        .where(and(eq(taskDependencies.userId, a), eq(taskDependencies.taskId, aTask.id))),
+      FK_VIOLATION,
+    );
+    await expectPgError(
+      db.update(taskDependencies).set({ userId: b }).where(eq(taskDependencies.userId, a)),
+      FK_VIOLATION,
+    );
+  });
+
+  it("refuse a task that waits on itself", async () => {
+    await expectPgError(
+      db.insert(taskDependencies).values({ userId: a, taskId: aInboxTask.id, blockedByTaskId: aInboxTask.id }),
+      CHECK_VIOLATION,
+    );
+  });
+
+  it("delete a dependency with either of its tasks", async () => {
+    const other = await createTask(a, { title: "Alice's other task" });
+    await addBlocker(a, other.id, aTask.id);
+    expect(await aEdges()).toHaveLength(2);
+
+    await deleteTask(a, aInboxTask.id); // the blocker side of aTask < aInboxTask
+    expect((await aEdges()).map((e) => [e.taskId, e.blockedByTaskId])).toEqual([[other.id, aTask.id]]);
+    await deleteTask(a, other.id); // the blocked side
+    expect(await aEdges()).toEqual([]);
   });
 });
 

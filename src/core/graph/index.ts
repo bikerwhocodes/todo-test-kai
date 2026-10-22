@@ -42,12 +42,7 @@ export function wouldCreateCycle(
 ): boolean {
   if (taskId === blockedById) return true;
 
-  const blockersOf = new Map<TaskId, TaskId[]>();
-  for (const e of edges) {
-    const list = blockersOf.get(e.taskId);
-    if (list) list.push(e.blockedById);
-    else blockersOf.set(e.taskId, [e.blockedById]);
-  }
+  const blockersOf = blockersIndex(edges);
 
   // Iterative DFS from blockedById along "depends on" links; reaching
   // taskId means the new edge would close a loop.
@@ -66,6 +61,55 @@ export function wouldCreateCycle(
     }
   }
   return false;
+}
+
+/**
+ * The loop that adding "taskId is blocked by blockedById" would close, for
+ * explaining a rejection: `[taskId, blockedById, ..., taskId]`, each task
+ * waiting on the next (shortest such loop). A self-edge is `[taskId, taskId]`.
+ * Returns null when the edge would not create a cycle, i.e. exactly when
+ * wouldCreateCycle returns false.
+ *
+ * O(V + E); `edges` is not mutated.
+ */
+export function cyclePath(
+  edges: ReadonlyArray<DependencyEdge>,
+  taskId: TaskId,
+  blockedById: TaskId,
+): TaskId[] | null {
+  if (taskId === blockedById) return [taskId, taskId];
+
+  const blockersOf = blockersIndex(edges);
+  // BFS from blockedById along "depends on" links, remembering how each
+  // task was reached so the path back to blockedById can be rebuilt.
+  const via = new Map<TaskId, TaskId | null>([[blockedById, null]]);
+  const queue: TaskId[] = [blockedById];
+  for (let i = 0; i < queue.length; i++) {
+    const current = queue[i]!;
+    for (const id of blockersOf.get(current) ?? []) {
+      if (id === taskId) {
+        const path: TaskId[] = [taskId];
+        for (let at: TaskId | null = current; at !== null; at = via.get(at)!) path.push(at);
+        // path is [taskId, current, ..., blockedById]; flip the tail.
+        return [taskId, ...path.slice(1).reverse(), taskId];
+      }
+      if (!via.has(id)) {
+        via.set(id, current);
+        queue.push(id);
+      }
+    }
+  }
+  return null;
+}
+
+function blockersIndex(edges: ReadonlyArray<DependencyEdge>): Map<TaskId, TaskId[]> {
+  const blockersOf = new Map<TaskId, TaskId[]>();
+  for (const e of edges) {
+    const list = blockersOf.get(e.taskId);
+    if (list) list.push(e.blockedById);
+    else blockersOf.set(e.taskId, [e.blockedById]);
+  }
+  return blockersOf;
 }
 
 /**

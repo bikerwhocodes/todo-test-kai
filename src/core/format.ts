@@ -50,3 +50,23 @@ export function formatDeadline(deadline: string, today: string): string {
     : { day: "numeric", month: "short", year: "numeric" };
   return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...parts }).format(new Date(isoToUtcMs(deadline)));
 }
+
+/**
+ * Explains why a new "waits on" link was refused. `titles` is the loop it would
+ * close, first task repeated at the end (see core/graph cyclePath):
+ * ["A", "B", "A"] -> 'That would create a loop: "A" waits on "B", which waits on "A".'
+ */
+export function formatLoopMessage(titles: readonly string[]): string {
+  const q = (title: string) => `"${title}"`;
+  if (titles.length <= 2) return `That would create a loop: ${q(titles[0] ?? "This task")} would wait on itself.`;
+  const [first, second, ...rest] = titles;
+  const tail = rest.map((t) => `, which waits on ${q(t)}`).join("");
+  return `That would create a loop: ${q(first!)} waits on ${q(second!)}${tail}.`;
+}
+
+/** Badge text for a task waiting on open blockers: "Waiting on A", "Waiting on A and 2 more". */
+export function formatWaitingOn(titles: readonly string[]): string {
+  const [first, ...rest] = titles;
+  if (first === undefined) return "";
+  return rest.length === 0 ? `Waiting on ${first}` : `Waiting on ${first} and ${rest.length} more`;
+}

@@ -8,7 +8,7 @@ import { QuickAdd } from "@/components/tasks/quick-add";
 import { TaskList } from "@/components/tasks/task-list";
 import { toTaskView } from "@/components/tasks/types";
 import { getProject, listProjects } from "@/server/repo/projects";
-import { listProjectTasks } from "@/server/repo/tasks";
+import { listOpenTaskTitles, listProjectTasks } from "@/server/repo/tasks";
 import { getUserSettings } from "@/server/repo/user-settings";
 import { requireUser } from "@/server/session";
 
@@ -32,10 +32,11 @@ export default async function ProjectPage({ params }: Props) {
   const project = await loadProject(id);
   if (!project) notFound();
 
-  const [tasks, projects, settings] = await Promise.all([
+  const [tasks, projects, settings, taskOptions] = await Promise.all([
     listProjectTasks(user.id, project.id),
     listProjects(user.id),
     getUserSettings(user.id),
+    listOpenTaskTitles(user.id),
   ]);
   const archived = project.archivedAt !== null;
   const projectOptions = projects.map((p) => ({ id: p.id, name: p.name }));
@@ -56,6 +57,7 @@ export default async function ProjectPage({ params }: Props) {
         open={tasks.open.map(toTaskView)}
         done={tasks.done.map(toTaskView)}
         projects={projectOptions}
+        taskOptions={taskOptions}
         today={isoDateInTimeZone(new Date(), settings.timeZone)}
         emptyText={archived ? "No open tasks." : "No open tasks. Add one above."}
       />

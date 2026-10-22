@@ -3,12 +3,14 @@ import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm"
 import { db } from "@/server/db";
 import { subtasks, tasks, type Subtask, type Task } from "@/server/db/schema";
 import { NO_PRIORITY, type TaskPatch } from "@/lib/validation";
+import { blockersFor, type Blocker } from "./dependencies";
 import { NotFoundError } from "./errors";
 import { assertActiveProject } from "./projects";
 
 // Every function takes userId first and scopes every query by it.
 
-export type TaskWithSubtasks = Task & { subtasks: Subtask[] };
+/** A task with its subtasks and its direct blockers (any status; only open ones block). */
+export type TaskWithSubtasks = Task & { subtasks: Subtask[]; blockers: Blocker[] };
 export type TaskList = { open: TaskWithSubtasks[]; done: TaskWithSubtasks[] };
 
 export async function createTask(
@@ -26,7 +28,17 @@ export async function getTask(userId: string, id: string): Promise<TaskWithSubta
     .from(tasks)
     .where(and(eq(tasks.userId, userId), eq(tasks.id, id)));
   if (!row) return null;
-  return { ...row, subtasks: await subtasksFor(userId, [row.id]).then((m) => m.get(row.id) ?? []) };
+  const [subs, blockers] = await Promise.all([subtasksFor(userId, [row.id]), blockersFor(userId, [row.id])]);
+  return { ...row, subtasks: subs.get(row.id) ?? [], blockers: blockers.get(row.id) ?? [] };
+}
+
+/** The user's open tasks in every project, for picking what a task waits on. */
+export async function listOpenTaskTitles(userId: string): Promise<{ id: string; title: string }[]> {
+  return db
+    .select({ id: tasks.id, title: tasks.title })
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), eq(tasks.status, "open")))
+    .orderBy(asc(tasks.sort), asc(tasks.createdAt), asc(tasks.id));
 }
 
 /** Tasks with no project. Open first (oldest first), then completed (latest first). */
@@ -52,11 +64,10 @@ async function listTasks(userId: string, scope: SQL): Promise<TaskList> {
       .where(where("done"))
       .orderBy(desc(tasks.completedAt), asc(tasks.id)),
   ]);
-  const byTask = await subtasksFor(
-    userId,
-    [...open, ...done].map((t) => t.id),
-  );
-  const attach = (t: Task) => ({ ...t, subtasks: byTask.get(t.id) ?? [] });
+  // One query each for every task's subtasks and blockers, not one per task.
+  const ids = [...open, ...done].map((t) => t.id);
+  const [subs, blockers] = await Promise.all([subtasksFor(userId, ids), blockersFor(userId, ids)]);
+  const attach = (t: Task) => ({ ...t, subtasks: subs.get(t.id) ?? [], blockers: blockers.get(t.id) ?? [] });
   return { open: open.map(attach), done: done.map(attach) };
 }
 
@@ -123,7 +134,7 @@ export async function setTaskCompleted(userId: string, id: string, completed: bo
   return row;
 }
 
-/** Deletes the task and (by cascade) its subtasks. */
+/** Deletes the task and (by cascade) its subtasks and its links to blockers and blocked tasks. */
 export async function deleteTask(userId: string, id: string): Promise<void> {
   const deleted = await db
     .delete(tasks)

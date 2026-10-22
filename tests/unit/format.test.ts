@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { daysBetween, formatDeadline, formatEstimate, formatPriority, isoDateInTimeZone } from "@/core/format";
+import {
+  daysBetween,
+  formatDeadline,
+  formatEstimate,
+  formatLoopMessage,
+  formatPriority,
+  formatWaitingOn,
+  isoDateInTimeZone,
+} from "@/core/format";
 
 describe("formatEstimate", () => {
   it.each([
@@ -40,5 +48,36 @@ describe("formatDeadline", () => {
   it("counts days across a DST change", () => {
     expect(daysBetween("2026-10-31", "2026-11-02")).toBe(2);
     expect(daysBetween("2026-03-28", "2026-03-30")).toBe(2);
+  });
+});
+
+describe("formatLoopMessage", () => {
+  it("explains a self-loop", () => {
+    expect(formatLoopMessage(["Paint", "Paint"])).toBe('That would create a loop: "Paint" would wait on itself.');
+  });
+
+  it("explains a 2-cycle", () => {
+    expect(formatLoopMessage(["A", "B", "A"])).toBe('That would create a loop: "A" waits on "B", which waits on "A".');
+  });
+
+  it("explains a longer loop hop by hop", () => {
+    expect(formatLoopMessage(["A", "B", "C", "A"])).toBe(
+      'That would create a loop: "A" waits on "B", which waits on "C", which waits on "A".',
+    );
+  });
+});
+
+describe("formatWaitingOn", () => {
+  it("names a single blocker", () => {
+    expect(formatWaitingOn(["Buy paint"])).toBe("Waiting on Buy paint");
+  });
+
+  it("names the first blocker and counts the rest", () => {
+    expect(formatWaitingOn(["Buy paint", "Tape edges"])).toBe("Waiting on Buy paint and 1 more");
+    expect(formatWaitingOn(["A", "B", "C"])).toBe("Waiting on A and 2 more");
+  });
+
+  it("is empty when nothing blocks", () => {
+    expect(formatWaitingOn([])).toBe("");
   });
 });
