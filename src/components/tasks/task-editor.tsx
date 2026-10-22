@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useId, useState, useTransition } from "react";
 import { DESCRIPTION_MAX, ESTIMATE_MAX_MIN, NO_PRIORITY, TITLE_MAX } from "@/lib/limits";
 import { deleteTaskAction, updateTaskAction } from "@/server/actions/tasks";
@@ -269,16 +270,29 @@ export function TaskEditor({
 
       <SubtaskChecklist taskId={task.id} subtasks={task.subtasks} />
 
-      <div className="flex justify-end border-t border-stone-100 pt-3">
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={pending}
-          className="rounded-md px-2 py-1 text-sm text-red-700 hover:bg-red-50 hover:text-red-800 disabled:opacity-60"
-        >
-          Delete task
-        </button>
-      </div>
+      {task.recurrence ? (
+        // Occurrences can't be deleted one by one: skip them, or delete the whole series.
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 pt-3 text-sm text-stone-500">
+          <p>Changes here apply to this occurrence only.</p>
+          <Link
+            href={`/recurring/${task.recurrence.seriesId}`}
+            className="rounded-md px-2 py-1 text-stone-600 hover:bg-stone-100 hover:text-stone-900"
+          >
+            Edit series
+          </Link>
+        </div>
+      ) : (
+        <div className="flex justify-end border-t border-stone-100 pt-3">
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={pending}
+            className="rounded-md px-2 py-1 text-sm text-red-700 hover:bg-red-50 hover:text-red-800 disabled:opacity-60"
+          >
+            Delete task
+          </button>
+        </div>
+      )}
     </div>
   );
 }
