@@ -11,6 +11,7 @@ vi.mock("react", async (orig) => ({ ...(await orig<object>()), ...(await import(
 
 import * as authActions from "@/server/actions/auth";
 import * as projectActions from "@/server/actions/projects";
+import * as seriesActions from "@/server/actions/series";
 import * as taskActions from "@/server/actions/tasks";
 import { requireUser } from "@/server/session";
 import { actAs, revalidatePath } from "../next-mocks";
@@ -23,6 +24,7 @@ import { seedWorld, snapshotOf, type World } from "./world";
 const actions: Record<ActionName, (input?: unknown) => Promise<unknown>> = {
   ...taskActions,
   ...projectActions,
+  ...seriesActions,
   ...authActions,
 };
 
@@ -65,11 +67,17 @@ describe("B calling actions with A's ids gets not-found and changes nothing", ()
     expect(await actions.deleteSubtaskAction({ id: missing })).toEqual(
       await actions.deleteSubtaskAction({ id: w.a.subtask.id }),
     );
+    expect(await actions.updateSeriesAction({ id: missing, title: "x" })).toEqual(
+      await actions.updateSeriesAction({ id: w.a.series.id, title: "x" }),
+    );
+    expect(await actions.skipOccurrenceAction({ id: missing })).toEqual(
+      await actions.skipOccurrenceAction({ id: w.a.occurrence.id }),
+    );
   });
 });
 
 describe("actions that take no ids touch only the caller's data", () => {
-  it("createTaskAction and createProjectAction ignore a smuggled userId", async () => {
+  it("create actions ignore a smuggled userId", async () => {
     const aBefore = await snapshotOf(w.a.id);
 
     const project = await actions.createProjectAction({ name: "mine", userId: w.a.id });
@@ -78,6 +86,15 @@ describe("actions that take no ids touch only the caller's data", () => {
     expect(task).toMatchObject({ ok: true, data: { userId: w.b.id, projectId: null } });
     const updated = await actions.updateTaskAction({ id: w.b.inboxTask.id, title: "still mine", userId: w.a.id });
     expect(updated).toMatchObject({ ok: true, data: { userId: w.b.id, title: "still mine" } });
+    const series = await actions.createSeriesAction({
+      title: "mine",
+      userId: w.a.id,
+      rule: { kind: "daily", interval: 1, startDate: "2026-01-01" },
+    });
+    expect(series).toMatchObject({
+      ok: true,
+      data: { series: { userId: w.b.id, projectId: null }, occurrence: { userId: w.b.id } },
+    });
 
     expect(await snapshotOf(w.a.id)).toEqual(aBefore);
   });

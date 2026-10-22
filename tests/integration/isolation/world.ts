@@ -1,8 +1,10 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { expect } from "vitest";
 import { db } from "@/server/db";
-import { session, type Project, type Subtask, type Task } from "@/server/db/schema";
+import { addDays, localToday } from "@/core/dates";
+import { session, tasks, type Project, type RecurringSeries, type Subtask, type Task } from "@/server/db/schema";
 import { createProject, setProjectArchived } from "@/server/repo/projects";
+import { createSeries } from "@/server/repo/series";
 import { addSubtask } from "@/server/repo/subtasks";
 import { createTask, setTaskCompleted, updateTask } from "@/server/repo/tasks";
 import { resetDb } from "../helpers";
@@ -25,6 +27,10 @@ export type Account = SignedUp & {
   completedTask: Task;
   archivedProjectTask: Task;
   subtask: Subtask;
+  /** Daily series in `project`: yesterday's occurrence is done, today's is open. */
+  series: RecurringSeries;
+  occurrence: Task;
+  completedOccurrence: Task;
 };
 
 export type World = { a: Account; b: Account };
@@ -62,8 +68,28 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
     estimateMin: 25,
   });
   let completedTask = await createTask(user.id, { title: `${marker} completed task` });
-  completedTask = await setTaskCompleted(user.id, completedTask.id, true);
+  const today = localToday(timeZone, new Date());
+  completedTask = await setTaskCompleted(user.id, completedTask.id, true, today);
   const subtask = await addSubtask(user.id, projectTask.id, `${marker} subtask`);
+
+  // Started yesterday and completed then, so the open occurrence is due today.
+  const yesterday = addDays(today, -1);
+  const { series, occurrence: first } = await createSeries(
+    user.id,
+    {
+      title: `${marker} series`,
+      description: `${marker} series description`,
+      projectId: project.id,
+      rule: { kind: "daily", interval: 1, weekdays: null, startDate: yesterday, endDate: null },
+    },
+    yesterday,
+  );
+  const completedOccurrence = await setTaskCompleted(user.id, first!.id, true, yesterday);
+  const [occurrence] = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.userId, user.id), eq(tasks.seriesId, series.id), eq(tasks.status, "open")));
+  if (!occurrence) throw new Error(`no open occurrence for ${slug}`);
 
   return {
     ...user,
@@ -77,6 +103,9 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
     completedTask,
     archivedProjectTask,
     subtask,
+    series,
+    occurrence,
+    completedOccurrence,
   };
 }
 
@@ -113,6 +142,9 @@ export function fingerprints(account: Account): string[] {
     account.completedTask.id,
     account.archivedProjectTask.id,
     account.subtask.id,
+    account.series.id,
+    account.occurrence.id,
+    account.completedOccurrence.id,
   ];
 }
 

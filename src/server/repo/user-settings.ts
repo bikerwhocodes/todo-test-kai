@@ -1,5 +1,6 @@
 import "server-only";
 import { eq } from "drizzle-orm";
+import { localToday, type IsoDate } from "@/core/dates";
 import { normalizeTimeZone } from "@/core/time-zone";
 import { db } from "@/server/db";
 import { userSettings, type UserSettings } from "@/server/db/schema";
@@ -23,4 +24,10 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
   const created = await db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) });
   if (!created) throw new Error(`user_settings missing for user ${userId}`);
   return created;
+}
+
+/** The user's calendar date right now, in their time zone (spec §7's "today"). */
+export async function getUserToday(userId: string, now = new Date()): Promise<IsoDate> {
+  const settings = await getUserSettings(userId);
+  return localToday(settings.timeZone, now);
 }

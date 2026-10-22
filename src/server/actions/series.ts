@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import type { RecurringSeries, Task } from "@/server/db/schema";
+import * as seriesRepo from "@/server/repo/series";
+import { getUserToday } from "@/server/repo/user-settings";
 import { requireUser } from "@/server/session";
 import { createSeriesInput, seriesIdInput, taskIdInput, updateSeriesInput } from "@/lib/validation";
 import { runAction, type ActionResult } from "./result";
@@ -18,30 +20,29 @@ export async function createSeriesAction(
   input: unknown,
 ): Promise<ActionResult<{ series: RecurringSeries; occurrence: Task | null }>> {
   const user = await requireUser();
-  return runAction(createSeriesInput, input, async () => {
-    void user;
+  return runAction(createSeriesInput, input, async (data) => {
+    const created = await seriesRepo.createSeries(user.id, data, await getUserToday(user.id));
     refresh();
-    throw new Error("TODO(M3): createSeriesAction");
+    return created;
   });
 }
 
 /** Updates the template/rule and the open occurrence; closed occurrences are untouched. */
 export async function updateSeriesAction(input: unknown): Promise<ActionResult<RecurringSeries>> {
   const user = await requireUser();
-  return runAction(updateSeriesInput, input, async () => {
-    void user;
+  return runAction(updateSeriesInput, input, async ({ id, ...patch }) => {
+    const series = await seriesRepo.updateSeries(user.id, id, patch, await getUserToday(user.id));
     refresh();
-    throw new Error("TODO(M3): updateSeriesAction");
+    return series;
   });
 }
 
 /** Deletes the series with all of its occurrences, history included. */
 export async function deleteSeriesAction(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  return runAction(seriesIdInput, input, async () => {
-    void user;
+  return runAction(seriesIdInput, input, async ({ id }) => {
+    await seriesRepo.deleteSeries(user.id, id);
     refresh();
-    throw new Error("TODO(M3): deleteSeriesAction");
   });
 }
 
@@ -50,9 +51,9 @@ export async function skipOccurrenceAction(
   input: unknown,
 ): Promise<ActionResult<{ skipped: Task; next: Task | null }>> {
   const user = await requireUser();
-  return runAction(taskIdInput, input, async () => {
-    void user;
+  return runAction(taskIdInput, input, async ({ id }) => {
+    const result = await seriesRepo.skipOccurrence(user.id, id, await getUserToday(user.id));
     refresh();
-    throw new Error("TODO(M3): skipOccurrenceAction");
+    return result;
   });
 }

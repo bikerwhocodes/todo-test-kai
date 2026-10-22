@@ -13,6 +13,8 @@ import AppLayout from "@/app/(app)/layout";
 import InboxPage from "@/app/(app)/inbox/page";
 import ProjectPage, { generateMetadata as projectMetadata } from "@/app/(app)/projects/[id]/page";
 import ArchivedProjectsPage from "@/app/(app)/projects/archived/page";
+import RecurringPage from "@/app/(app)/recurring/page";
+import SeriesPage, { generateMetadata as seriesMetadata } from "@/app/(app)/recurring/[id]/page";
 import TodayPage from "@/app/(app)/today/page";
 import { NOT_FOUND, actAs } from "../next-mocks";
 import { PAGE_COVERAGE, type CoveredPage, type FileCases } from "./registry";
@@ -37,11 +39,11 @@ const PAGE_CASES: FileCases<CoveredPage> = {
   ],
   "src/app/(app)/today/page.tsx": [
     [
-      "shows B's time zone, not A's",
+      "shows B's time zone and due occurrences, not A's",
       async ({ a, b }) => {
         const tree = await TodayPage();
         expectNoneOf(a, tree);
-        expectSomeOf(b, tree, b.timeZone);
+        expectSomeOf(b, tree, b.timeZone, b.occurrence.title);
       },
     ],
   ],
@@ -84,6 +86,35 @@ const PAGE_CASES: FileCases<CoveredPage> = {
         const tree = await ArchivedProjectsPage();
         expectNoneOf(a, tree);
         expectSomeOf(b, tree, b.archivedProject.name);
+      },
+    ],
+  ],
+  "src/app/(app)/recurring/page.tsx": [
+    [
+      "lists only B's series and project options",
+      async ({ a, b }) => {
+        const tree = await RecurringPage();
+        expectNoneOf(a, tree);
+        expectSomeOf(b, tree, b.series.title, b.series.id, b.project.name);
+      },
+    ],
+  ],
+  "src/app/(app)/recurring/[id]/page.tsx": [
+    [
+      "A's series ids (and other A ids) are a 404 with a generic title",
+      async ({ a }) => {
+        for (const id of [a.series.id, a.occurrence.id, a.completedOccurrence.id, a.project.id]) {
+          await expect(SeriesPage(params(id)), `series page for ${id}`).rejects.toThrow(NOT_FOUND);
+          expect(await seriesMetadata(params(id))).toEqual({ title: "Recurring task · NextUp" });
+        }
+      },
+    ],
+    [
+      "B's own series page shows only B's data",
+      async ({ a, b }) => {
+        const tree = await SeriesPage(params(b.series.id));
+        expectNoneOf(a, tree);
+        expectSomeOf(b, tree, b.series.title, b.series.id, b.project.id);
       },
     ],
   ],

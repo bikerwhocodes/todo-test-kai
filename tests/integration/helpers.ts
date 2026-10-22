@@ -25,6 +25,7 @@ function pgCode(err: unknown): string | undefined {
 
 export const FK_VIOLATION = "23503";
 export const CHECK_VIOLATION = "23514";
+export const UNIQUE_VIOLATION = "23505";
 
 export async function expectPgError(query: PromiseLike<unknown>, code: string) {
   const err = await Promise.resolve(query).then(

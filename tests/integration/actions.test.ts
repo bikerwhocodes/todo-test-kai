@@ -11,6 +11,13 @@ vi.mock("react", async (orig) => ({ ...(await orig<object>()), ...(await import(
 
 import { createTaskAction, setTaskCompletedAction, updateTaskAction, deleteTaskAction } from "@/server/actions/tasks";
 import { createProjectAction } from "@/server/actions/projects";
+import {
+  createSeriesAction,
+  deleteSeriesAction,
+  skipOccurrenceAction,
+  updateSeriesAction,
+} from "@/server/actions/series";
+import * as seriesRepo from "@/server/repo/series";
 import * as tasksRepo from "@/server/repo/tasks";
 import { createUser, resetDb } from "./helpers";
 import { actAs, revalidatePath } from "./next-mocks";
@@ -122,5 +129,82 @@ describe("task actions", () => {
   it("redirects to /login without a session", async () => {
     await expect(createTaskAction({ title: "x" })).rejects.toThrow("REDIRECT:/login");
     await expect(createProjectAction({ name: "x" })).rejects.toThrow("REDIRECT:/login");
+    await expect(createSeriesAction({ title: "x" })).rejects.toThrow("REDIRECT:/login");
+    await expect(skipOccurrenceAction({ id: "x" })).rejects.toThrow("REDIRECT:/login");
+  });
+});
+
+describe("series actions", () => {
+  // Far in the future, so the dates don't depend on the real "today".
+  const rule = { kind: "daily", interval: 1, startDate: "2099-01-01" };
+
+  it("create, complete, skip, edit and delete a series through actions", async () => {
+    const userId = await signIn("ada@example.com");
+
+    const created = await createSeriesAction({ title: " Stretch ", priority: null, rule });
+    expect(created).toMatchObject({
+      ok: true,
+      data: {
+        series: { userId, title: "Stretch", priority: 4, weekdays: null, endDate: null },
+        occurrence: { title: "Stretch", occurrenceDate: "2099-01-01", deadline: "2099-01-01", status: "open" },
+      },
+    });
+    expect(revalidatePath).toHaveBeenCalled();
+    if (!created.ok) return;
+    const { series, occurrence } = created.data;
+
+    expect(await setTaskCompletedAction({ id: occurrence!.id, completed: true })).toMatchObject({
+      ok: true,
+      data: { status: "done" },
+    });
+    const second = (await seriesRepo.getSeriesDetail(userId, series.id))!.open!;
+    expect(second.occurrenceDate).toBe("2099-01-02");
+
+    const skipped = await skipOccurrenceAction({ id: second.id });
+    expect(skipped).toMatchObject({
+      ok: true,
+      data: { skipped: { id: second.id, status: "skipped" }, next: { occurrenceDate: "2099-01-03" } },
+    });
+
+    expect(await setTaskCompletedAction({ id: occurrence!.id, completed: false })).toEqual({
+      ok: false,
+      error: "Only the most recent occurrence of a recurring task can be reopened",
+    });
+    expect(await deleteTaskAction({ id: occurrence!.id })).toEqual({
+      ok: false,
+      error: "Skip this occurrence or delete the series instead",
+    });
+    expect(await setTaskCompletedAction({ id: second.id, completed: true })).toEqual({
+      ok: false,
+      error: "This occurrence was skipped",
+    });
+
+    const updated = await updateSeriesAction({ id: series.id, title: "Stretch more" });
+    expect(updated).toMatchObject({ ok: true, data: { title: "Stretch more" } });
+    expect((await seriesRepo.getSeriesDetail(userId, series.id))!.open).toMatchObject({ title: "Stretch more" });
+
+    expect(await deleteSeriesAction({ id: series.id })).toEqual({ ok: true, data: undefined });
+    expect(await seriesRepo.listSeries(userId)).toEqual([]);
+    expect(await deleteSeriesAction({ id: series.id })).toEqual({ ok: false, error: "Series not found" });
+  });
+
+  it("skipping a one-off task is refused", async () => {
+    await signIn("ada@example.com");
+    const task = await createTaskAction({ title: "x" });
+    if (!task.ok) throw new Error(task.error);
+    expect(await skipOccurrenceAction({ id: task.data.id })).toEqual({
+      ok: false,
+      error: "Only recurring tasks can be skipped",
+    });
+  });
+
+  it("returns field errors for invalid rules without writing anything", async () => {
+    const userId = await signIn("ada@example.com");
+    const weekly = await createSeriesAction({ title: "x", rule: { ...rule, kind: "weekly", weekdays: [] } });
+    expect(weekly).toMatchObject({ ok: false, error: "Pick at least one weekday" });
+    const ended = await createSeriesAction({ title: "x", rule: { ...rule, endDate: "2098-01-01" } });
+    expect(ended).toMatchObject({ ok: false, error: "End date must be on or after the start date" });
+    expect(await seriesRepo.listSeries(userId)).toEqual([]);
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

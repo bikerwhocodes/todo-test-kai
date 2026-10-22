@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { Subtask, Task } from "@/server/db/schema";
 import * as subtasksRepo from "@/server/repo/subtasks";
 import * as tasksRepo from "@/server/repo/tasks";
+import { getUserToday } from "@/server/repo/user-settings";
 import { requireUser } from "@/server/session";
 import {
   addSubtaskInput,
@@ -44,7 +45,7 @@ export async function updateTaskAction(input: unknown): Promise<ActionResult<Tas
 export async function setTaskCompletedAction(input: unknown): Promise<ActionResult<Task>> {
   const user = await requireUser();
   return runAction(setTaskCompletedInput, input, async ({ id, completed }) => {
-    const task = await tasksRepo.setTaskCompleted(user.id, id, completed);
+    const task = await tasksRepo.setTaskCompleted(user.id, id, completed, await getUserToday(user.id));
     refresh();
     return task;
   });
