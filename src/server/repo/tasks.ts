@@ -43,6 +43,15 @@ export async function listOpenTaskTitles(userId: string): Promise<{ id: string; 
     .orderBy(asc(tasks.sort), asc(tasks.createdAt), asc(tasks.id));
 }
 
+/** An open task as the Plan My Day panel's "Add a task" search lists it. */
+export type PlanSearchOption = { id: string; title: string; estimateMin: number | null; projectId: string | null };
+
+/** The user's open tasks in every project, for adding to today's plan by hand. */
+export async function listOpenTasksForPlanning(userId: string): Promise<PlanSearchOption[]> {
+  void userId;
+  throw new Error("TODO(worker A): listOpenTasksForPlanning");
+}
+
 /** Tasks with no project. Open first (oldest first), then completed (latest first). */
 export async function listInboxTasks(userId: string): Promise<TaskList> {
   return listTasks(userId, isNull(tasks.projectId));

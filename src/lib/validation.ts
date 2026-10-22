@@ -175,7 +175,15 @@ const planTaskIds = z.array(id).max(PLAN_MAX_ITEMS, `A plan holds at most ${PLAN
 export const suggestPlanInput = z.object({ availableMin });
 
 /** The suggestions the user kept, in their order; appended after the existing plan. */
-export const acceptPlanInput = z.object({ taskIds: planTaskIds, availableMin: availableMin.optional() });
+export const acceptPlanInput = z.object({
+  taskIds: planTaskIds,
+  availableMin: availableMin.optional(),
+  /** Ids in `taskIds` the user added by hand; saved with source "manual". */
+  manualTaskIds: planTaskIds.optional(),
+});
+
+/** The custom available time the user last chose, prefilled next time. */
+export const rememberAvailableTimeInput = z.object({ availableMin });
 
 /** Add to, remove from, or dismiss a suggestion for today's plan. */
 export const planTaskInput = z.object({ taskId: id });

@@ -59,6 +59,17 @@ export type PlanDraft = Omit<Draft, "suggestions" | "didntFit" | "nothingFits"> 
   suggestions: Titled<Suggestion>[];
   didntFit: Titled<DidntFit>[];
   nothingFits: { shortest: Titled<DidntFit>[] } | null;
+  /** Open tasks left out because they wait on an open task, for the panel's "Blocked" list. */
+  blocked: BlockedTask[];
+};
+
+/** An open task the scheduler skipped as blocked, with the open tasks it waits on. */
+export type BlockedTask = {
+  id: string;
+  title: string;
+  projectId: string | null;
+  /** Titles of its open direct blockers, in a stable order. */
+  waitingOn: string[];
 };
 
 /** The user's plan for `date`, or an empty one if there is none. Read-only. */
@@ -189,6 +200,8 @@ export async function suggest(userId: string, today: IsoDate, availableMin: numb
     didntFit: draft.didntFit.map(titled),
     nothingFits: draft.nothingFits ? { shortest: draft.nothingFits.shortest.map(titled) } : null,
     excluded: [...draft.excluded],
+    // TODO(worker A): blocked tasks with titles and open blockers' titles.
+    blocked: [],
   };
 }
 
@@ -205,8 +218,18 @@ export async function suggest(userId: string, today: IsoDate, availableMin: numb
 export async function acceptSuggestions(
   userId: string,
   today: IsoDate,
-  { taskIds, availableMin }: { taskIds: string[]; availableMin?: number },
+  {
+    taskIds,
+    availableMin,
+    manualTaskIds = [],
+  }: {
+    taskIds: string[];
+    availableMin?: number;
+    /** Ids in `taskIds` the user added by hand (search, "Add anyway"); saved with source "manual". */
+    manualTaskIds?: string[];
+  },
 ): Promise<string[]> {
+  void manualTaskIds; // TODO(worker A)
   assertIsoDate(today, "today");
   const ids = [...new Set(taskIds)];
   return db.transaction(async (tx) => {

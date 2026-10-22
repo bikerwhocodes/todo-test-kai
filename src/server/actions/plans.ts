@@ -25,8 +25,12 @@ export async function suggestPlanAction(input: unknown): Promise<ActionResult<pl
 /** Appends the kept suggestions after today's existing plan. Returns the ids added. */
 export async function acceptPlanAction(input: unknown): Promise<ActionResult<string[]>> {
   const user = await requireUser();
-  return runAction(acceptPlanInput, input, async ({ taskIds, availableMin }) => {
-    const added = await plansRepo.acceptSuggestions(user.id, await getUserToday(user.id), { taskIds, availableMin });
+  return runAction(acceptPlanInput, input, async ({ taskIds, availableMin, manualTaskIds }) => {
+    const added = await plansRepo.acceptSuggestions(user.id, await getUserToday(user.id), {
+      taskIds,
+      availableMin,
+      manualTaskIds,
+    });
     refresh();
     return added;
   });

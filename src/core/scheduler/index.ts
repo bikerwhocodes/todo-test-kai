@@ -4,6 +4,7 @@
  */
 
 export { compareCandidates, rankCandidates, scoreTask, type ScoreContext } from "./candidates";
+export { explainReasons, explainSize } from "./explain";
 export { suggestPlan } from "./fit";
 export type {
   CandidateInput,
