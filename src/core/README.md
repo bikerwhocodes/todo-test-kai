@@ -35,3 +35,25 @@ Semantics:
 - The schedule is fixed. It is anchored at `startDate` (Todoist's `every`, not `every!`).
 - Weekly rules use Monday-based weeks. Week 0 is the week that contains `startDate`, and every `interval`-th week after that is active.
 - Invalid rules or dates throw `RangeError`.
+
+## Graph (`core/graph`)
+
+| Function | Notes |
+|---|---|
+| `wouldCreateCycle(edges, taskId, blockedById): boolean` | Run this before inserting an edge. Self-edges count as cycles. |
+| `blockedSet(tasks, edges): Set<TaskId>` | A task is blocked if any of its direct blockers is open. |
+
+## Scheduler (`core/scheduler`)
+
+Step 1 of `suggestPlan()`: filter, score and rank. The greedy fit step builds on this.
+
+| Function | Notes |
+|---|---|
+| `rankCandidates(input): { ranked, excluded }` | `input` is `{ today, tasks, edges, inPlanIds?, dismissedIds?, carriedOverIds?, defaultEstimateMin? }`. Pass `today = localToday(tz, now)`. |
+| `scoreTask(task, ctx)` | One task against the score table. Returns `score`, `reasons`, `estimateMin` and `dueDate`. |
+| `compareCandidates(a, b)` | The ranking order, also exported for the fit step. |
+
+- **Excluded** (the first match wins): not open (`done`), already in today's plan (`in_plan`), dismissed today (`dismissed`), a recurring occurrence dated after today (`future_occurrence`), blocked by an open task (`blocked`). Blocked tasks are never ranked. Pass every open blocker in `tasks`, because missing blockers count as done.
+- **Score**: the sum of the rows in `scheduler/weights.ts`, the only place weights live. The due date is `deadline ?? occurrenceDate`.
+- **Order**: higher score first. Ties go to the earlier due date (no due date last), then the higher priority, then the shorter estimate, then the earlier `createdAt`, then the smaller `id` by code-unit order. Input order never matters.
+- **Reasons**: `{ code, points, ... }` in score-table order. The codes are `OVERDUE`, `STALE_OVERDUE`, `DUE_TODAY`, `DUE_TOMORROW`, `DUE_IN`, `PRIORITY`, `UNBLOCKS`, `CARRIED_OVER`, `RECURRING` and `ASSUMED_ESTIMATE`, plus `FITS_REMAINING`, which the fit step adds.
