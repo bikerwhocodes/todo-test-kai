@@ -1,7 +1,16 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/server/db";
-import { projects, recurringSeries, subtasks, tasks, type Project, type Subtask, type Task } from "@/server/db/schema";
+import {
+  projects,
+  recurringSeries,
+  subtasks,
+  tasks,
+  userSettings,
+  type Project,
+  type Subtask,
+  type Task,
+} from "@/server/db/schema";
 import { NotFoundError } from "@/server/repo/errors";
 import {
   createProject,
@@ -25,11 +34,14 @@ import {
   createTask,
   deleteTask,
   getTask,
+  listDueTasks,
   listInboxTasks,
   listProjectTasks,
+  listUpcoming,
   setTaskCompleted,
   updateTask,
 } from "@/server/repo/tasks";
+import { getUserSettings, updateUserSettings } from "@/server/repo/user-settings";
 import { FK_VIOLATION, createUser, expectPgError, resetDb } from "../helpers";
 
 // Repo layer: user B must never read or change anything of user A's, through the repo or the database.
@@ -80,6 +92,23 @@ describe("tasks", () => {
 
     expect(await rowOf(tasks, aTask.id)).toEqual(before);
     expect(await rowOf(subtasks, aSubtask.id)).toBeDefined();
+  });
+
+  it("B's Today and Upcoming lists never include A's dated tasks or occurrences", async () => {
+    await updateTask(a, aTask.id, { deadline: "2026-10-22" });
+    await updateTask(a, aInboxTask.id, { deadline: "2026-10-24" });
+    await createSeries(
+      a,
+      { title: "Alice's series", rule: { kind: "daily", interval: 1, weekdays: null, startDate: "2026-10-23", endDate: null } },
+      TODAY,
+    );
+
+    expect(ids(await listDueTasks(a, TODAY))).toEqual([aTask.id]);
+    expect(await listUpcoming(a, TODAY)).toHaveLength(2);
+    expect(await listDueTasks(b, TODAY)).toEqual([]);
+    expect(await listDueTasks(b, "2030-01-01")).toEqual([]);
+    expect(await listUpcoming(b, TODAY)).toEqual([]);
+    expect(await listUpcoming(b, "2026-10-21")).toEqual([]);
   });
 
   it("B cannot reopen A's completed task", async () => {
@@ -184,6 +213,18 @@ describe("recurring series", () => {
       entity: "project",
     });
     expect((await getSeriesDetail(b, series.id))!.projectId).toBeNull();
+  });
+});
+
+describe("settings", () => {
+  it("updating B's settings never touches A's row", async () => {
+    const aBefore = await getUserSettings(a);
+    await getUserSettings(b);
+
+    const row = await updateUserSettings(b, { timeZone: "Pacific/Kiritimati", defaultEstimateMin: 45 });
+
+    expect(row).toMatchObject({ userId: b, timeZone: "Pacific/Kiritimati", defaultEstimateMin: 45 });
+    expect((await db.select().from(userSettings).where(eq(userSettings.userId, a)))[0]).toEqual(aBefore);
   });
 });
 

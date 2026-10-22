@@ -1,8 +1,9 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, between, desc, eq, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { db } from "@/server/db";
 import { subtasks, tasks, type Subtask, type Task } from "@/server/db/schema";
 import type { IsoDate } from "@/core/dates";
+import { todayCutoff, upcomingRange } from "@/core/views";
 import { NO_PRIORITY, type TaskPatch } from "@/lib/validation";
 import { ConflictError, NotFoundError } from "./errors";
 import { assertActiveProject } from "./projects";
@@ -60,6 +61,53 @@ async function listTasks(userId: string, scope: SQL): Promise<TaskList> {
   );
   const attach = (t: Task) => ({ ...t, subtasks: byTask.get(t.id) ?? [] });
   return { open: open.map(attach), done: done.map(attach) };
+}
+
+/**
+ * The date a task is placed on in the Today and Upcoming views: an occurrence's
+ * occurrence_date, a one-off task's deadline. An occurrence's own deadline is
+ * ignored here (it starts equal to its date and may be edited), so an occurrence
+ * is in exactly one of Today (see listDueOccurrences) and Upcoming, never both.
+ */
+const viewDate = sql<IsoDate | null>`coalesce(${tasks.occurrenceDate}, ${tasks.deadline})`;
+
+/** Open one-off tasks with a deadline on or before `today` (overdue first), for the Today view. */
+export async function listDueTasks(userId: string, today: IsoDate): Promise<TaskWithSubtasks[]> {
+  const rows = await db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.userId, userId),
+        eq(tasks.status, "open"),
+        isNull(tasks.seriesId),
+        lte(tasks.deadline, todayCutoff(today)),
+      ),
+    )
+    .orderBy(asc(tasks.deadline), asc(tasks.id));
+  return withSubtasks(userId, rows);
+}
+
+/**
+ * Open tasks dated in upcomingRange(today), one-off tasks and occurrences alike,
+ * ordered by that date (see viewDate), then id.
+ */
+export async function listUpcoming(userId: string, today: IsoDate): Promise<TaskWithSubtasks[]> {
+  const { from, to } = upcomingRange(today);
+  const rows = await db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), eq(tasks.status, "open"), between(viewDate, from, to)))
+    .orderBy(asc(viewDate), asc(tasks.id));
+  return withSubtasks(userId, rows);
+}
+
+async function withSubtasks(userId: string, rows: Task[]): Promise<TaskWithSubtasks[]> {
+  const byTask = await subtasksFor(
+    userId,
+    rows.map((t) => t.id),
+  );
+  return rows.map((t) => ({ ...t, subtasks: byTask.get(t.id) ?? [] }));
 }
 
 /** The user's subtasks of `taskIds`, grouped by task in display order. */

@@ -26,6 +26,10 @@ export type Account = SignedUp & {
   projectTask: Task;
   completedTask: Task;
   archivedProjectTask: Task;
+  /** Inbox task with today's deadline (Today's "Due" list). */
+  dueTask: Task;
+  /** Inbox task due two days from today (the Upcoming view). */
+  upcomingTask: Task;
   subtask: Subtask;
   /** Daily series in `project`: yesterday's occurrence is done, today's is open. */
   series: RecurringSeries;
@@ -71,6 +75,12 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
   const today = localToday(timeZone, new Date());
   completedTask = await setTaskCompleted(user.id, completedTask.id, true, today);
   const subtask = await addSubtask(user.id, projectTask.id, `${marker} subtask`);
+  const dueTask = await updateTask(user.id, (await createTask(user.id, { title: `${marker} due task` })).id, {
+    deadline: today,
+  });
+  const upcomingTask = await updateTask(user.id, (await createTask(user.id, { title: `${marker} upcoming task` })).id, {
+    deadline: addDays(today, 2),
+  });
 
   // Started yesterday and completed then, so the open occurrence is due today.
   const yesterday = addDays(today, -1);
@@ -102,6 +112,8 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
     projectTask,
     completedTask,
     archivedProjectTask,
+    dueTask,
+    upcomingTask,
     subtask,
     series,
     occurrence,
@@ -141,6 +153,8 @@ export function fingerprints(account: Account): string[] {
     account.projectTask.id,
     account.completedTask.id,
     account.archivedProjectTask.id,
+    account.dueTask.id,
+    account.upcomingTask.id,
     account.subtask.id,
     account.series.id,
     account.occurrence.id,
@@ -170,10 +184,14 @@ export function stringsIn(value: unknown): string[] {
   return out;
 }
 
-/** Fails if anything identifying `owner` appears in `value` (what someone else was shown). */
-export function expectNoneOf(owner: Account, value: unknown) {
+/**
+ * Fails if anything identifying `owner` appears in `value` (what someone else was shown).
+ * `allow` lists fingerprints that are public there, e.g. a zone name in a picker of every zone.
+ */
+export function expectNoneOf(owner: Account, value: unknown, { allow = [] as string[] } = {}) {
   const strings = stringsIn(value);
   for (const print of fingerprints(owner)) {
+    if (allow.includes(print)) continue;
     const hit = strings.find((s) => s.includes(print));
     expect(hit, `leaked "${print}" (belongs to ${owner.email})`).toBeUndefined();
   }

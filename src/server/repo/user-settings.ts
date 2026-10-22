@@ -39,5 +39,13 @@ export async function getUserToday(userId: string, now = new Date()): Promise<Is
  * they are and only the Today/Upcoming boundaries move with the new zone.
  */
 export async function updateUserSettings(userId: string, patch: SettingsPatch): Promise<UserSettings> {
-  throw new Error("not implemented");
+  // Make sure the row exists first (see getUserSettings), so the update always lands.
+  await getUserSettings(userId);
+  const values: Partial<typeof userSettings.$inferInsert> = { updatedAt: new Date() };
+  if (patch.timeZone !== undefined) values.timeZone = patch.timeZone;
+  if (patch.defaultEstimateMin !== undefined) values.defaultEstimateMin = patch.defaultEstimateMin;
+
+  const [row] = await db.update(userSettings).set(values).where(eq(userSettings.userId, userId)).returning();
+  if (!row) throw new Error(`user_settings missing for user ${userId}`);
+  return row;
 }

@@ -2,12 +2,14 @@ import Link from "next/link";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { NavLinks } from "@/components/projects/nav-links";
 import { NewProjectForm } from "@/components/projects/new-project-form";
+import { TimeZoneBanner } from "@/components/settings/time-zone-banner";
 import { listProjects } from "@/server/repo/projects";
+import { getUserSettings } from "@/server/repo/user-settings";
 import { requireUser } from "@/server/session";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const projects = await listProjects(user.id);
+  const [projects, settings] = await Promise.all([listProjects(user.id), getUserSettings(user.id)]);
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-5xl flex-col px-4">
@@ -15,6 +17,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <span className="font-semibold tracking-tight">NextUp</span>
         <div className="flex items-center gap-3 text-sm text-stone-600">
           <span className="hidden sm:inline">{user.email}</span>
+          <Link href="/settings" className="rounded-md px-2 py-1 hover:bg-stone-200 hover:text-stone-900">
+            Settings
+          </Link>
           <SignOutButton />
         </div>
       </header>
@@ -23,6 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLinks
             primary={[
               { href: "/today", label: "Today" },
+              { href: "/upcoming", label: "Upcoming" },
               { href: "/inbox", label: "Inbox" },
               { href: "/recurring", label: "Recurring" },
             ]}
@@ -40,7 +46,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </Link>
           </div>
         </aside>
-        <main className="min-w-0 flex-1 py-6 md:max-w-3xl md:pt-0">{children}</main>
+        <main className="min-w-0 flex-1 py-6 md:max-w-3xl md:pt-0">
+          <TimeZoneBanner profileZone={settings.timeZone} />
+          {children}
+        </main>
       </div>
     </div>
   );

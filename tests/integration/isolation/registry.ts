@@ -1,6 +1,7 @@
 import type * as authActions from "@/server/actions/auth";
 import type * as projectActions from "@/server/actions/projects";
 import type * as seriesActions from "@/server/actions/series";
+import type * as settingsActions from "@/server/actions/settings";
 import type * as taskActions from "@/server/actions/tasks";
 import type { World } from "./world";
 
@@ -47,6 +48,7 @@ export type ActionName =
   | keyof typeof taskActions
   | keyof typeof projectActions
   | keyof typeof seriesActions
+  | keyof typeof settingsActions
   | keyof typeof authActions;
 
 export type NotFound = "Task not found" | "Project not found" | "Subtask not found" | "Series not found";
@@ -269,6 +271,12 @@ export const ACTION_COVERAGE: Record<ActionName, ActionCoverage> = {
     ],
   },
 
+  // src/server/actions/settings.ts
+  updateSettingsAction: {
+    exempt:
+      "Takes no resource id; writes the caller's own user_settings row. actions.test.ts checks a smuggled userId is ignored.",
+  },
+
   // src/server/actions/auth.ts
   signOutAction: {
     exempt: "Takes no input and ends the caller's own session. actions.test.ts checks A stays signed in when B signs out.",
@@ -304,6 +312,8 @@ export const PAGE_COVERAGE = {
   "src/app/(app)/projects/archived/page.tsx": { cases: "Lists only the caller's archived projects." },
   "src/app/(app)/recurring/page.tsx": { cases: "Lists only the caller's recurring series." },
   "src/app/(app)/recurring/[id]/page.tsx": { cases: "Another user's series id is a 404; own page shows only own data." },
+  "src/app/(app)/settings/page.tsx": { cases: "Shows only the caller's own zone and default estimate." },
+  "src/app/(app)/upcoming/page.tsx": { cases: "Lists only the caller's upcoming tasks and occurrences." },
 } as const satisfies Record<string, FileCoverage>;
 
 type CoveredKeys<T> = { [K in keyof T]: T[K] extends { cases: string } ? K : never }[keyof T];

@@ -12,6 +12,7 @@ vi.mock("react", async (orig) => ({ ...(await orig<object>()), ...(await import(
 import * as authActions from "@/server/actions/auth";
 import * as projectActions from "@/server/actions/projects";
 import * as seriesActions from "@/server/actions/series";
+import * as settingsActions from "@/server/actions/settings";
 import * as taskActions from "@/server/actions/tasks";
 import { requireUser } from "@/server/session";
 import { actAs, revalidatePath } from "../next-mocks";
@@ -25,6 +26,7 @@ const actions: Record<ActionName, (input?: unknown) => Promise<unknown>> = {
   ...taskActions,
   ...projectActions,
   ...seriesActions,
+  ...settingsActions,
   ...authActions,
 };
 
@@ -94,6 +96,22 @@ describe("actions that take no ids touch only the caller's data", () => {
     expect(series).toMatchObject({
       ok: true,
       data: { series: { userId: w.b.id, projectId: null }, occurrence: { userId: w.b.id } },
+    });
+
+    expect(await snapshotOf(w.a.id)).toEqual(aBefore);
+  });
+
+  it("updateSettingsAction writes only the caller's settings, even when sent A's userId", async () => {
+    const aBefore = await snapshotOf(w.a.id);
+
+    const result = await actions.updateSettingsAction({
+      timeZone: "Pacific/Kiritimati",
+      defaultEstimateMin: 45,
+      userId: w.a.id,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: { userId: w.b.id, timeZone: "Pacific/Kiritimati", defaultEstimateMin: 45 },
     });
 
     expect(await snapshotOf(w.a.id)).toEqual(aBefore);
