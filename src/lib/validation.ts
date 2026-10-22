@@ -1,14 +1,10 @@
 import { z } from "zod";
+import { DESCRIPTION_MAX, ESTIMATE_MAX_MIN, PROJECT_NAME_MAX, TITLE_MAX } from "./limits";
 
-// Input schemas shared by server actions and forms. Optional task fields accept
-// null, which clears them; omitting a key leaves the stored value unchanged.
+// Input schemas for server actions. Optional task fields accept null, which clears
+// them; omitting a key leaves the stored value unchanged.
 
-export const TITLE_MAX = 500;
-export const PROJECT_NAME_MAX = 100;
-export const DESCRIPTION_MAX = 10_000;
-export const ESTIMATE_MAX_MIN = 24 * 60;
-/** Priority 4 means "no priority"; clearing the field sets it back to 4. */
-export const NO_PRIORITY = 4;
+export * from "./limits";
 
 const id = z.uuid("Invalid id");
 

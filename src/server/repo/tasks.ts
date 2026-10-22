@@ -78,10 +78,18 @@ async function subtasksFor(userId: string, taskIds: string[]): Promise<Map<strin
 
 /**
  * Applies only the keys present in `patch`; a null value clears that field
- * (priority goes back to "none"). Moving to a project requires an active one.
+ * (priority goes back to "none"). Moving to a different project requires an
+ * active one; re-sending the current (possibly archived) project is allowed.
  */
 export async function updateTask(userId: string, id: string, patch: TaskPatch): Promise<Task> {
-  if (patch.projectId) await assertActiveProject(userId, patch.projectId);
+  if (patch.projectId) {
+    const [current] = await db
+      .select({ projectId: tasks.projectId })
+      .from(tasks)
+      .where(and(eq(tasks.userId, userId), eq(tasks.id, id)));
+    if (!current) throw new NotFoundError("task");
+    if (current.projectId !== patch.projectId) await assertActiveProject(userId, patch.projectId);
+  }
   const values: Partial<typeof tasks.$inferInsert> = { updatedAt: new Date() };
   if (patch.title !== undefined) values.title = patch.title;
   if (patch.description !== undefined) values.description = patch.description;
