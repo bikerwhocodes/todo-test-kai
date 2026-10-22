@@ -191,3 +191,37 @@ export function occurrencesBetween(
   }
   return out;
 }
+
+/**
+ * The earliest occurrence on or after `date` (and on or after `startDate`).
+ * Used when a series is created or its rule is edited.
+ *
+ * @returns `null` when the series has ended by then.
+ */
+export function occurrenceOnOrAfterDate(rule: RecurrenceRule, date: IsoDate): IsoDate | null {
+  assertValidRule(rule);
+  assertIsoDate(date, "date");
+  return withinEnd(rule, occurrenceOnOrAfter(rule, toDayNumber(date)));
+}
+
+/**
+ * How many scheduled dates have passed while the occurrence on `occurrenceDate`
+ * stayed open: the occurrences in `[occurrenceDate, today)`. 0 when it is due today
+ * or later. Nothing is back-filled; this only feeds the "missed N days" label.
+ */
+export function missedOccurrences(rule: RecurrenceRule, occurrenceDate: IsoDate, today: IsoDate): number {
+  assertIsoDate(today, "today");
+  if (compareIsoDate(occurrenceDate, today) >= 0) return 0;
+  return occurrencesBetween(rule, occurrenceDate, fromDayNumber(toDayNumber(today) - 1), MISSED_CAP).length;
+}
+
+/** Upper bound for `missedOccurrences`; the label shows "99+" beyond it. */
+export const MISSED_CAP = 100;
+
+/** "Missed 5 days" for daily rules, "Missed 2 times" for weekly ones; null when nothing was missed. */
+export function missedLabel(kind: RecurrenceRule["kind"], missed: number): string | null {
+  if (missed <= 0) return null;
+  const n = missed >= MISSED_CAP ? `${MISSED_CAP - 1}+` : String(missed);
+  const unit = kind === "daily" ? (missed === 1 ? "day" : "days") : missed === 1 ? "time" : "times";
+  return `Missed ${n} ${unit}`;
+}

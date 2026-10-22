@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -135,6 +136,62 @@ export const projects = pgTable(
   ],
 );
 
+export const RECURRENCE_KINDS = ["daily", "weekly"] as const;
+export type RecurrenceKind = (typeof RECURRENCE_KINDS)[number];
+
+/**
+ * The template and rule of a recurring task (spec §7). Its occurrences are rows in
+ * `tasks` with series_id + occurrence_date; at most one of them is open at a time.
+ * Editing the series rewrites the template and the open occurrence, never closed ones.
+ */
+export const recurringSeries = pgTable(
+  "recurring_series",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // Template copied onto each new occurrence.
+    projectId: uuid("project_id"),
+    title: text("title").notNull(),
+    description: text("description"),
+    priority: smallint("priority").notNull().default(4),
+    estimateMin: integer("estimate_min"),
+    // Rule; see core/recurrence. Dates are floating, in the user's zone.
+    kind: text("kind", { enum: RECURRENCE_KINDS }).notNull(),
+    interval: integer("interval").notNull().default(1),
+    // 0 = Sunday … 6 = Saturday; null for daily rules.
+    weekdays: smallint("weekdays").array(),
+    startDate: date("start_date", { mode: "string" }).notNull(),
+    endDate: date("end_date", { mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("recurring_series_user_id_id_unique").on(t.userId, t.id),
+    foreignKey({
+      name: "recurring_series_user_project_fk",
+      columns: [t.userId, t.projectId],
+      foreignColumns: [projects.userId, projects.id],
+    }),
+    index("recurring_series_user_id_idx").on(t.userId),
+    check("recurring_series_title_not_blank", sql`length(btrim(${t.title})) between 1 and 500`),
+    check("recurring_series_priority_range", sql`${t.priority} between 1 and 4`),
+    check("recurring_series_estimate_min_range", sql`${t.estimateMin} between 1 and 1440`),
+    check("recurring_series_kind_valid", sql`${t.kind} in ('daily', 'weekly')`),
+    check("recurring_series_interval_range", sql`${t.interval} between 1 and 365`),
+    check(
+      "recurring_series_weekdays_match_kind",
+      sql`case when ${t.kind} = 'weekly'
+        then cardinality(${t.weekdays}) between 1 and 7 and ${t.weekdays} <@ array[0,1,2,3,4,5,6]::smallint[]
+        else ${t.weekdays} is null end`,
+    ),
+    check("recurring_series_end_after_start", sql`${t.endDate} is null or ${t.endDate} >= ${t.startDate}`),
+  ],
+);
+
+export type RecurringSeries = typeof recurringSeries.$inferSelect;
+
 export const TASK_STATUSES = ["open", "done", "skipped"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
@@ -156,6 +213,9 @@ export const tasks = pgTable(
     estimateMin: integer("estimate_min"),
     status: text("status", { enum: TASK_STATUSES }).notNull().default("open"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    // Set together for an occurrence of a recurring series; null for one-off tasks.
+    seriesId: uuid("series_id"),
+    occurrenceDate: date("occurrence_date", { mode: "string" }),
     sort: integer("sort").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -167,6 +227,17 @@ export const tasks = pgTable(
       columns: [t.userId, t.projectId],
       foreignColumns: [projects.userId, projects.id],
     }),
+    foreignKey({
+      name: "tasks_user_series_fk",
+      columns: [t.userId, t.seriesId],
+      foreignColumns: [recurringSeries.userId, recurringSeries.id],
+    }).onDelete("cascade"),
+    // One row per series date, and at most one open occurrence per series.
+    unique("tasks_series_occurrence_unique").on(t.seriesId, t.occurrenceDate),
+    uniqueIndex("tasks_one_open_per_series")
+      .on(t.seriesId)
+      .where(sql`${t.status} = 'open' and ${t.seriesId} is not null`),
+    check("tasks_series_has_occurrence_date", sql`(${t.seriesId} is null) = (${t.occurrenceDate} is null)`),
     index("tasks_user_id_project_id_idx").on(t.userId, t.projectId),
     check("tasks_title_not_blank", sql`length(btrim(${t.title})) between 1 and 500`),
     check("tasks_priority_range", sql`${t.priority} between 1 and 4`),

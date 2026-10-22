@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { NotFoundError } from "@/server/repo/errors";
+import { ConflictError, NotFoundError } from "@/server/repo/errors";
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
@@ -34,6 +34,7 @@ export async function runAction<S extends z.ZodType, T>(
       const what = error.entity[0]!.toUpperCase() + error.entity.slice(1);
       return { ok: false, error: `${what} not found` };
     }
+    if (error instanceof ConflictError) return { ok: false, error: error.message };
     throw error;
   }
 }

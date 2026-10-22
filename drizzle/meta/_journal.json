@@ -15,6 +15,13 @@
       "when": 1792670000000,
       "tag": "0001_tasks_projects",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792680000000,
+      "tag": "0002_recurring_series",
+      "breakpoints": true
     }
   ]
 }
