@@ -123,6 +123,35 @@ off while typing in a field, with Ctrl/Meta/Alt held, and inside dialogs. The ru
 - `q` / `n` focus quick add. Pages without one go to Inbox and focus its quick add once it
   renders.
 
+## Plan My Day panel
+
+"Plan my day" on Today (in the Plan header and the empty state) opens the panel, a native
+`<dialog>`: full screen on phones, a sheet on the right from `sm` up. It also opens on the
+`nextup:open-plan` window event and on `/today?plan=1` (the param is then removed). The rules
+(durations, totals, moves, search) are pure functions in `src/components/plan/model.ts`.
+
+1. **Time**: 1h, 2h, 4h or a custom time ("90", "90m", "1h 30m", "1.5h"; 1 minute to 24h). A custom
+   time is remembered and prefilled next time.
+2. **Review**: today's saved plan ("Planned"), then the draft (suggestions with 1–2 reasons, and
+   tasks "Added by you"). The total reads "1h 45m planned of 2h"; past the time it says "25 min
+   over", calmly, and accepting is still allowed. Done tasks are struck through and not counted;
+   tasks without an estimate count at the default estimate. "Didn't fit" offers "Add anyway" and
+   "Split" (makes "<title> (part 1)" with the original's priority and deadline); "Blocked" lists
+   what each task waits on.
+
+Saved-plan edits (remove, reorder, estimates) save at once. Removing a suggestion or a planned task
+also hides it from today's suggestions. "Add N to plan" saves the draft; "Cancel" drops it.
+
+| Key | On a focused row |
+|---|---|
+| `Alt`+`↑` / `Alt`+`↓` | Move it up / down within its group (announced, focus stays on it) |
+| `Backspace` / `Delete` | Remove it |
+| `Enter` on the estimate | Edit the estimate; `Enter` saves, `Esc` cancels |
+
+`↑` / `↓` and `Enter` pick from the "Add a task" matches. `Esc` first cancels an estimate edit or clears the
+search, otherwise it closes the panel and returns focus to the button that opened it. `Ctrl`/`⌘`+`Enter` accepts. Rows can also be
+dragged by their ⠿ handle.
+
 ## Account isolation
 
 One account must never read or change another's data. `tests/integration/isolation/` proves it

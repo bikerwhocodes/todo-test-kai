@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import { dueNotInPlan } from "@/core/agenda";
 import { localToday } from "@/core/dates";
+import { PlanPanel } from "@/components/plan/plan-panel";
 import { TaskGroup, toGroupItems } from "@/components/tasks/task-group";
 import { PlanSection } from "@/components/today/plan-section";
 import { listDueTasks } from "@/server/repo/agenda";
 import { getPlan } from "@/server/repo/plans";
 import { listProjects } from "@/server/repo/projects";
 import { occurrenceBadges } from "@/server/repo/series";
-import { listOpenTaskTitles } from "@/server/repo/tasks";
+import { listOpenTaskTitles, listOpenTasksForPlanning } from "@/server/repo/tasks";
 import { getUserSettings } from "@/server/repo/user-settings";
 import { requireUser } from "@/server/session";
 
@@ -19,11 +20,12 @@ export default async function TodayPage() {
   const settings = await getUserSettings(user.id);
   const now = new Date();
   const today = localToday(settings.timeZone, now);
-  const [due, projects, taskOptions, plan] = await Promise.all([
+  const [due, projects, taskOptions, plan, planOptions] = await Promise.all([
     listDueTasks(user.id, today),
     listProjects(user.id),
     listOpenTaskTitles(user.id),
     getPlan(user.id, today),
+    listOpenTasksForPlanning(user.id),
   ]);
   // Today's plan, in plan order; planned tasks are left out of the due section.
   const planned = plan.items.map((i) => i.task);
@@ -59,6 +61,24 @@ export default async function TodayPage() {
           emptyText={due.length > 0 ? "Everything due is in your plan." : "Nothing due today or overdue."}
         />
       </div>
+      {/* Opened by "Plan my day", the "p" shortcut or ?plan=1. Plain data only. */}
+      <PlanPanel
+        saved={planned.map((t) => ({
+          taskId: t.id,
+          title: t.title,
+          estimateMin: t.estimateMin,
+          done: t.status === "done",
+        }))}
+        planAvailableMin={plan.availableMin}
+        lastAvailableMin={settings.lastAvailableMin}
+        defaultEstimateMin={settings.defaultEstimateMin}
+        options={planOptions.map((o) => ({
+          id: o.id,
+          title: o.title,
+          estimateMin: o.estimateMin,
+          projectId: o.projectId,
+        }))}
+      />
     </section>
   );
 }
