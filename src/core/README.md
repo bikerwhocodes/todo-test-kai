@@ -69,7 +69,7 @@ The app-wide keyboard shortcuts, minus `/` (above). `components/keyboard` descri
 |---|---|
 | `isTypingTarget(target)` | Text-like inputs, textarea, select, contenteditable. Checkboxes, buttons and the like don't count. |
 | `acceptsShortcut(event, target)` | The shared guard: no Ctrl/Meta/Alt, not already handled or composing, not typing, not in a dialog. |
-| `resolveShortcut(state, event, target, { now, helpOpen })` | Returns `{ state, action }`. `g` then `i`/`t`/`u`/`p` goes to Inbox/Today/Upcoming/Projects, `j`/`k` move, `x` (or Space on a row's main button) toggles complete, `e` edits, `q`/`n` quick add, `?` toggles help. |
+| `resolveShortcut(state, event, target, { now, helpOpen })` | Returns `{ state, action }`. `g` then `i`/`t`/`u`/`p` goes to Inbox/Today/Upcoming/Projects, `j`/`k` move, `x` (or Space on a row's main button) toggles complete, `e` edits, `q`/`n` quick add, a plain `p` opens Plan My Day, `?` toggles help. |
 | `moveIndex(current, delta, count)` | The row to focus after `j`/`k`, clamped; from no row (`-1`) either key picks the first. |
 
 Semantics:
@@ -95,6 +95,8 @@ Semantics:
 | `scoreTask(task, ctx)` | One task against the score table. Returns `score`, `reasons`, `estimateMin` and `dueDate`. |
 | `compareCandidates(a, b)` | The ranking order, also exported for the fit step. |
 | `suggestPlan(input): Draft` | `input` is the `rankCandidates` input plus `availableMin`. Returns `{ suggestions, didntFit, nothingFits, totals, excluded }`. Saves nothing. |
+| `explainReasons(reasons, max = 2): string[]` | Labels for the panel, most points first, ties in score-table order. Zero-point reasons (`RECURRING`, `ASSUMED_ESTIMATE`, `FITS_REMAINING`) only fill free slots. Always 1..`max` labels ("Fits your time" when there are no reasons). |
+| `explainSize(size): string` | "Needs 3h, more than your 2h" (`TOO_LARGE`), "Needs 45m; 20m left" (`NO_ROOM_LEFT`). |
 
 - **Excluded** (the first match wins): not open (`done`), already in today's plan (`in_plan`), dismissed today (`dismissed`), a recurring occurrence dated after today (`future_occurrence`), blocked by an open task (`blocked`). Blocked tasks are never ranked. Pass every open blocker in `tasks`, because missing blockers count as done.
 - **Score**: the sum of the rows in `scheduler/weights.ts`, the only place weights live. The due date is `deadline ?? occurrenceDate`.

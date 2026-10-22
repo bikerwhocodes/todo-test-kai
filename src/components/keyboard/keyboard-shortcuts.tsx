@@ -1,8 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Fragment, useEffect, useId, useRef } from "react";
 import { INITIAL_SHORTCUT_STATE, moveIndex, resolveShortcut, type ShortcutAction } from "@/core/shortcuts";
+import { OPEN_PLAN_EVENT, OPEN_PLAN_PARAM } from "@/components/plan/events";
 import { QUICK_ADD_ID } from "@/components/tasks/quick-add";
 import { focusRingClass, quietButtonClass } from "@/components/ui";
 import { TASK_BUTTON, TASK_CHECKBOX, TASK_ROW, describeTarget } from "./target";
@@ -28,6 +29,7 @@ const HELP: { heading: string; items: [string[][], string][] }[] = [
       [[["/"]], "Search"],
     ],
   },
+  { heading: "Plan", items: [[[["p"]], "Plan My Day"]] },
   {
     heading: "Tasks",
     items: [
@@ -70,6 +72,13 @@ function focusProjects() {
  */
 export function KeyboardShortcuts() {
   const router = useRouter();
+  // Read by the keydown listener; a ref so navigating doesn't re-register it
+  // (which would drop a pending "g" or the quick add focus after "q").
+  const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const returnFocusRef = useRef<Element | null>(null);
   const titleId = useId();
@@ -138,6 +147,11 @@ export function KeyboardShortcuts() {
           router.push("/inbox");
           return;
         }
+        case "planMyDay":
+          // On Today the panel listens for the event; elsewhere it opens from the URL.
+          if (pathnameRef.current === "/today") window.dispatchEvent(new Event(OPEN_PLAN_EVENT));
+          else router.push(`/today?${OPEN_PLAN_PARAM}=1`);
+          return;
         case "toggleHelp":
           if (dialogRef.current?.open) dialogRef.current.close();
           else openHelp();

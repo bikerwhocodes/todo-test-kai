@@ -27,7 +27,8 @@ import type { ActionResult } from "@/server/actions/result";
 import { deleteTaskAction } from "@/server/actions/tasks";
 import { addBlocker } from "@/server/repo/dependencies";
 import { acceptSuggestions, getPlan, loadPlanInput } from "@/server/repo/plans";
-import { createTask, setTaskCompleted, updateTask } from "@/server/repo/tasks";
+import { createProject } from "@/server/repo/projects";
+import { createTask, listOpenTasksForPlanning, setTaskCompleted, updateTask } from "@/server/repo/tasks";
 import { updateUserSettings } from "@/server/repo/user-settings";
 import type { TaskPatch } from "@/lib/validation";
 import { CHECK_VIOLATION, FK_VIOLATION, UNIQUE_VIOLATION, expectPgError, resetDb } from "./helpers";
@@ -153,6 +154,47 @@ describe("suggestPlanAction", () => {
     expect(titlesOf(data(await suggestPlanAction({ availableMin: 600 })).suggestions)).toEqual(["Blocked", "Unsized"]);
   });
 
+  it("lists blocked tasks with the titles of their open blockers, and still writes nothing", async () => {
+    const project = await createProject(userId, { name: "Work" });
+    const first = await task("First blocker");
+    const second = await task("Second blocker");
+    const finished = await task("Finished blocker");
+    const blocked = await task("Blocked", { projectId: project.id, deadline: TODAY });
+    const chained = await task("Waits on Blocked");
+    const free = await task("Was blocked, now free");
+    const dismissed = await task("Blocked and dismissed");
+    // Added out of order: waitingOn follows task order, not edge order.
+    await addBlocker(userId, blocked.id, finished.id);
+    await addBlocker(userId, blocked.id, second.id);
+    await addBlocker(userId, blocked.id, first.id);
+    await addBlocker(userId, chained.id, blocked.id);
+    await addBlocker(userId, free.id, finished.id);
+    await addBlocker(userId, dismissed.id, first.id);
+    await setTaskCompleted(userId, finished.id, true, TODAY);
+    data(await dismissSuggestionAction({ taskId: dismissed.id }));
+    revalidatePath.mockClear();
+    const before = await snapshotOf(userId, { except: ["sessions"] });
+
+    const draft = data(await suggestPlanAction({ availableMin: 600 }));
+
+    expect(draft.blocked).toEqual([
+      { id: blocked.id, title: "Blocked", projectId: project.id, waitingOn: ["First blocker", "Second blocker"] },
+      { id: chained.id, title: "Waits on Blocked", projectId: null, waitingOn: ["Blocked"] },
+    ]);
+    // A done blocker doesn't block; a dismissal wins over being blocked.
+    expect(titlesOf(draft.suggestions)).toContain("Was blocked, now free");
+    expect(draft.excluded).toContainEqual({ id: dismissed.id, reason: "dismissed" });
+    expect(await snapshotOf(userId, { except: ["sessions"] })).toEqual(before);
+    expect(revalidatePath).not.toHaveBeenCalled();
+
+    // Once its blockers are done, Blocked leaves the list; Waits on Blocked still waits.
+    await setTaskCompleted(userId, first.id, true, TODAY);
+    await setTaskCompleted(userId, second.id, true, TODAY);
+    expect(data(await suggestPlanAction({ availableMin: 600 })).blocked).toEqual([
+      { id: chained.id, title: "Waits on Blocked", projectId: null, waitingOn: ["Blocked"] },
+    ]);
+  });
+
   it("requires a signed-in user", async () => {
     actAs(null);
     await expect(suggestPlanAction({ availableMin: 60 })).rejects.toThrow("REDIRECT:/login");
@@ -240,6 +282,40 @@ describe("acceptPlanAction", () => {
     expect(await db.select().from(dayPlans).where(eq(dayPlans.userId, userId))).toHaveLength(1);
   });
 
+  it("saves hand-added ids as manual and ignores manual ids that aren't being added", async () => {
+    const [picked, searched, anyway, stray] = [
+      await task("Picked"),
+      await task("Found by search"),
+      await task("Added anyway"),
+      await task("Not sent"),
+    ];
+
+    const added = data(
+      await acceptPlanAction({
+        taskIds: [picked.id, searched.id, anyway.id],
+        manualTaskIds: [searched.id, anyway.id, stray.id],
+        availableMin: 90,
+      }),
+    );
+
+    expect(added).toEqual([picked.id, searched.id, anyway.id]);
+    expect((await getPlan(userId, TODAY)).items.map((i) => [i.task.title, i.position, i.source])).toEqual([
+      ["Picked", 0, "suggested"],
+      ["Found by search", 1, "manual"],
+      ["Added anyway", 2, "manual"],
+    ]);
+
+    // A task already in the plan keeps its source.
+    expect(data(await acceptPlanAction({ taskIds: [picked.id], manualTaskIds: [picked.id] }))).toEqual([]);
+    expect((await getPlan(userId, TODAY)).items[0]).toMatchObject({ source: "suggested" });
+  });
+
+  it("rejects manual ids that aren't ids, saving nothing", async () => {
+    const open = await task("Open");
+    expect(await acceptPlanAction({ taskIds: [open.id], manualTaskIds: ["nope"] })).toMatchObject({ ok: false });
+    expect(await db.select().from(dayPlans).where(eq(dayPlans.userId, userId))).toEqual([]);
+  });
+
   it("refuses a task that isn't open, saving nothing", async () => {
     const open = await task("Open");
     const done = await setTaskCompleted(userId, (await task("Done")).id, true, TODAY);
@@ -272,6 +348,22 @@ describe("acceptPlanAction", () => {
       expect.arrayContaining(["abc", "def"]),
     );
     expect((await getPlan(userId, TODAY)).items.map((i) => i.position)).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+});
+
+describe("listOpenTasksForPlanning", () => {
+  it("lists the user's open tasks in every project, oldest first, with estimate and project", async () => {
+    const project = await createProject(userId, { name: "Work" });
+    const inbox = await task("Inbox", { estimateMin: 20 });
+    const work = await task("Work task", { projectId: project.id });
+    await setTaskCompleted(userId, (await task("Done")).id, true, TODAY);
+    const other = await signUp("bob@example.com", { timeZone: LA });
+    await task("Bob's", {}, other.id);
+
+    expect(await listOpenTasksForPlanning(userId)).toEqual([
+      { id: inbox.id, title: "Inbox", estimateMin: 20, projectId: null },
+      { id: work.id, title: "Work task", estimateMin: null, projectId: project.id },
+    ]);
   });
 });
 

@@ -27,8 +27,8 @@ export async function updateSettingsAction(input: unknown): Promise<ActionResult
  */
 export async function rememberAvailableTimeAction(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  return runAction(rememberAvailableTimeInput, input, async () => {
-    void user;
-    throw new Error("TODO(worker A): rememberAvailableTimeAction");
+  return runAction(rememberAvailableTimeInput, input, async ({ availableMin }) => {
+    await settingsRepo.setLastAvailableMin(user.id, availableMin);
+    refresh();
   });
 }

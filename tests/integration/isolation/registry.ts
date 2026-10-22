@@ -402,6 +402,10 @@ export const ACTION_COVERAGE: Record<ActionName, ActionCoverage> = {
     exempt:
       "Takes no resource id; writes the caller's own user_settings row. actions.test.ts checks a smuggled userId is ignored.",
   },
+  rememberAvailableTimeAction: {
+    exempt:
+      "Takes no resource id; writes only the caller's own user_settings.last_available_min. actions.test.ts checks a smuggled userId is ignored.",
+  },
 
   // src/server/actions/auth.ts
   signOutAction: {

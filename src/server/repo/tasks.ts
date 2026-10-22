@@ -48,8 +48,11 @@ export type PlanSearchOption = { id: string; title: string; estimateMin: number 
 
 /** The user's open tasks in every project, for adding to today's plan by hand. */
 export async function listOpenTasksForPlanning(userId: string): Promise<PlanSearchOption[]> {
-  void userId;
-  throw new Error("TODO(worker A): listOpenTasksForPlanning");
+  return db
+    .select({ id: tasks.id, title: tasks.title, estimateMin: tasks.estimateMin, projectId: tasks.projectId })
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), eq(tasks.status, "open")))
+    .orderBy(asc(tasks.sort), asc(tasks.createdAt), asc(tasks.id));
 }
 
 /** Tasks with no project. Open first (oldest first), then completed (latest first). */

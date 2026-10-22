@@ -54,11 +54,12 @@ import {
   getTask,
   listInboxTasks,
   listOpenTaskTitles,
+  listOpenTasksForPlanning,
   listProjectTasks,
   setTaskCompleted,
   updateTask,
 } from "@/server/repo/tasks";
-import { getUserSettings, updateUserSettings } from "@/server/repo/user-settings";
+import { getUserSettings, setLastAvailableMin, updateUserSettings } from "@/server/repo/user-settings";
 import { CHECK_VIOLATION, FK_VIOLATION, createUser, expectPgError, resetDb } from "../helpers";
 
 // Repo layer: user B must never read or change anything of user A's, through the repo or the database.
@@ -186,8 +187,10 @@ describe("task dependencies", () => {
   it("B cannot read A's blockers or pick A's tasks", async () => {
     expect(await blockersFor(b, [aTask.id, aInboxTask.id])).toEqual(new Map());
     expect(await listOpenTaskTitles(b)).toEqual([]);
-    // Positive control: A sees the link.
+    expect(await listOpenTasksForPlanning(b)).toEqual([]);
+    // Positive control: A sees the link and can pick A's own tasks.
     expect((await getTask(a, aTask.id))!.blockers.map((x) => x.id)).toEqual([aInboxTask.id]);
+    expect((await listOpenTasksForPlanning(a)).map((t) => t.id).sort()).toEqual([aTask.id, aInboxTask.id].sort());
   });
 
   it("B cannot add or remove links on A's tasks, even ones that would close A's loop", async () => {
@@ -341,6 +344,15 @@ describe("settings", () => {
     expect(row).toMatchObject({ userId: b, timeZone: "Pacific/Kiritimati", defaultEstimateMin: 45 });
     expect((await db.select().from(userSettings).where(eq(userSettings.userId, a)))[0]).toEqual(aBefore);
   });
+
+  it("remembering B's available time never touches A's row", async () => {
+    const aBefore = await getUserSettings(a);
+
+    await setLastAvailableMin(b, 75);
+
+    expect((await getUserSettings(b)).lastAvailableMin).toBe(75);
+    expect((await db.select().from(userSettings).where(eq(userSettings.userId, a)))[0]).toEqual(aBefore);
+  });
 });
 
 describe("day plans", () => {
@@ -375,6 +387,7 @@ describe("day plans", () => {
     const draft = await suggest(b, TODAY, 1440);
     expect(draft.suggestions).toEqual([]);
     expect(draft.excluded).toEqual([]);
+    expect(draft.blocked).toEqual([]);
     expect(draft.totals).toMatchObject({ existingCount: 0, existingMin: 0 });
 
     // Positive control: A sees all of it.

@@ -122,6 +122,30 @@ off while typing in a field, with Ctrl/Meta/Alt held, and inside dialogs. The ru
   and returns focus to the row.
 - `q` / `n` focus quick add. Pages without one go to Inbox and focus its quick add once it
   renders.
+- `p` opens Plan My Day (below). `g p` is still Projects.
+
+## Plan My Day
+
+Server side (`src/server/repo/plans.ts`, `src/server/actions/plans.ts`, ranking in `src/core/scheduler`):
+
+- `suggestPlanAction({ availableMin })` drafts today's plan and saves nothing. Besides the
+  suggestions, didn't-fit and nothing-fits lists, the draft has `blocked`: each open task left out
+  because it waits on an open task, with `waitingOn`, the titles of its open direct blockers.
+  It is built from the rows and edges the draft already loaded, so it costs no extra query. Both
+  lists are in task order (sort, then creation).
+- `acceptPlanAction({ taskIds, availableMin?, manualTaskIds? })` appends to today's plan. Ids
+  that are also in `manualTaskIds` (added by search or "Add anyway") are saved with source
+  `manual`, the rest `suggested`. A manual id that isn't in `taskIds` is ignored.
+- `rememberAvailableTimeAction({ availableMin })` stores the last custom time in
+  `user_settings.last_available_min` so the panel can prefill it. It writes nothing else.
+- `listOpenTasksForPlanning(userId)` lists open tasks (`id`, `title`, `estimateMin`,
+  `projectId`) for the panel's "Add a task" search.
+- `explainReasons(reasons, max = 2)` and `explainSize(size)` in `core/scheduler/explain.ts`
+  turn reason codes into labels ("Overdue by 2 days", "Priority 1", "Needs 45m; 20m left"):
+  most points first, zero-point reasons only in free slots, never empty.
+- Keyboard: `p` on `/today` dispatches `OPEN_PLAN_EVENT` on `window`; on any other page it goes
+  to `/today?plan=1` (`src/components/plan/events.ts`). Shortcuts stay off inside the panel's
+  dialog, like every dialog.
 
 ## Account isolation
 

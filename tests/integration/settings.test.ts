@@ -12,12 +12,13 @@ vi.mock("react", async (orig) => ({ ...(await orig<object>()), ...(await import(
 
 import { db } from "@/server/db";
 import { recurringSeries, tasks } from "@/server/db/schema";
-import { updateSettingsAction } from "@/server/actions/settings";
+import { rememberAvailableTimeAction, updateSettingsAction } from "@/server/actions/settings";
 import { listDueTasks, listUpcomingTasks } from "@/server/repo/agenda";
 import { createSeries, skipOccurrence } from "@/server/repo/series";
 import { createTask, setTaskCompleted, updateTask } from "@/server/repo/tasks";
-import { getUserSettings, getUserToday, updateUserSettings } from "@/server/repo/user-settings";
+import { getUserSettings, getUserToday, setLastAvailableMin, updateUserSettings } from "@/server/repo/user-settings";
 import { createUser, resetDb } from "./helpers";
+import { snapshotOf } from "./isolation/world";
 import { actAs, revalidatePath } from "./next-mocks";
 import { signUp } from "./session-helpers";
 
@@ -209,5 +210,55 @@ describe("partial updates", () => {
     const bare = await createUser("Bare");
     const row = await updateUserSettings(bare, { defaultEstimateMin: 15 });
     expect(row).toMatchObject({ userId: bare, timeZone: "UTC", defaultEstimateMin: 15 });
+  });
+});
+
+describe("remembering Plan My Day's available time", () => {
+  it("writes only user_settings.last_available_min (and updated_at)", async () => {
+    await oneOff("Something to plan", "2026-10-22");
+    const settingsBefore = await getUserSettings(userId);
+    const before = await snapshotOf(userId, { except: ["sessions", "user_settings"] });
+
+    expect(await rememberAvailableTimeAction({ availableMin: 150 })).toEqual({ ok: true, data: undefined });
+
+    expect(revalidatePath).toHaveBeenCalledWith("/", "layout");
+    expect(await snapshotOf(userId, { except: ["sessions", "user_settings"] })).toEqual(before);
+    const stored = await getUserSettings(userId);
+    expect(stored).toEqual({ ...settingsBefore, lastAvailableMin: 150, updatedAt: expect.any(Date) });
+    expect(stored.updatedAt.getTime()).toBeGreaterThanOrEqual(settingsBefore.updatedAt.getTime());
+
+    // Zero is a valid choice ("no time today") and overwrites the last one.
+    expect(await rememberAvailableTimeAction({ availableMin: 0 })).toMatchObject({ ok: true });
+    expect((await getUserSettings(userId)).lastAvailableMin).toBe(0);
+  });
+
+  it.each([
+    ["negative time", { availableMin: -1 }],
+    ["more than 24 hours", { availableMin: 1441 }],
+    ["fractional minutes", { availableMin: 1.5 }],
+    ["a string", { availableMin: "60" }],
+    ["an empty object", {}],
+    ["no input", undefined],
+  ])("rejects %s and changes nothing", async (_label, input) => {
+    await setLastAvailableMin(userId, 90);
+    const before = await getUserSettings(userId);
+
+    const result = await rememberAvailableTimeAction(input);
+
+    expect(result.ok).toBe(false);
+    expect(await getUserSettings(userId)).toEqual(before);
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("requires a session", async () => {
+    actAs(null);
+    await expect(rememberAvailableTimeAction({ availableMin: 60 })).rejects.toThrow("REDIRECT:/login");
+    expect((await getUserSettings(userId)).lastAvailableMin).toBeNull();
+  });
+
+  it("creates the settings row if the signup hook never did", async () => {
+    const bare = await createUser("Bare");
+    await setLastAvailableMin(bare, 45);
+    expect(await getUserSettings(bare)).toMatchObject({ userId: bare, timeZone: "UTC", lastAvailableMin: 45 });
   });
 });

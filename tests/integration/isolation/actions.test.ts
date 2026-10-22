@@ -143,6 +143,21 @@ describe("actions that take no ids touch only the caller's data", () => {
     expect(await snapshotOf(w.a.id)).toEqual(aBefore);
   });
 
+  it("rememberAvailableTimeAction writes only the caller's settings, even when sent A's userId", async () => {
+    const aBefore = await snapshotOf(w.a.id);
+    const bBefore = await snapshotOf(w.b.id, { except: ["sessions"] });
+
+    expect(await actions.rememberAvailableTimeAction({ availableMin: 75, userId: w.a.id })).toEqual({
+      ok: true,
+      data: undefined,
+    });
+
+    expect(await snapshotOf(w.a.id)).toEqual(aBefore);
+    const bAfter = await snapshotOf(w.b.id, { except: ["sessions"] });
+    expect(bAfter.user_settings).not.toEqual(bBefore.user_settings);
+    expect({ ...bAfter, user_settings: [] }).toEqual({ ...bBefore, user_settings: [] });
+  });
+
   it("suggestPlanAction drafts from the caller's tasks only and saves nothing, even when sent A's userId", async () => {
     const aBefore = await snapshotOf(w.a.id);
     const bBefore = await snapshotOf(w.b.id, { except: ["sessions"] });

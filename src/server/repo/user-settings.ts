@@ -49,3 +49,13 @@ export async function updateUserSettings(userId: string, patch: SettingsPatch): 
   if (!row) throw new Error(`user_settings missing for user ${userId}`);
   return row;
 }
+
+/** Remembers the available time last entered in Plan My Day. Writes only this user's settings row. */
+export async function setLastAvailableMin(userId: string, minutes: number): Promise<void> {
+  // As in updateUserSettings: make sure the row exists so the update lands.
+  await getUserSettings(userId);
+  await db
+    .update(userSettings)
+    .set({ lastAvailableMin: minutes, updatedAt: new Date() })
+    .where(eq(userSettings.userId, userId));
+}

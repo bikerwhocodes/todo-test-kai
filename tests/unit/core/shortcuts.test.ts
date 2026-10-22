@@ -103,6 +103,10 @@ describe("resolveShortcut: single keys", () => {
     ["q", body, { type: "quickAdd" }],
     ["n", body, { type: "quickAdd" }],
     ["N", body, { type: "quickAdd" }],
+    ["p", body, { type: "planMyDay" }],
+    ["p", null, { type: "planMyDay" }],
+    ["p", taskButton, { type: "planMyDay" }],
+    ["P", body, { type: "planMyDay" }], // Caps Lock
     ["?", body, { type: "toggleHelp" }],
     ["x", taskButton, { type: "toggleComplete" }],
     ["x", taskCheckbox, { type: "toggleComplete" }],
@@ -138,6 +142,7 @@ describe("resolveShortcut: single keys", () => {
     expect(action(key("J", { shiftKey: true }))).toBeNull();
     expect(action(key("X", { shiftKey: true }), taskButton)).toBeNull();
     expect(action(key("N", { shiftKey: true }))).toBeNull();
+    expect(action(key("P", { shiftKey: true }))).toBeNull();
     expect(action(key(" ", { shiftKey: true }), taskButton)).toBeNull();
     expect(action(key("?", { shiftKey: true }))).toEqual({ type: "toggleHelp" });
   });
@@ -156,6 +161,7 @@ describe("resolveShortcut: single keys", () => {
       [" ", taskButton],
       ["e", taskButton],
       ["q", body],
+      ["p", body],
       ["?", body],
       ["g", body],
     ] as const) {
@@ -179,16 +185,16 @@ describe("resolveShortcut: single keys", () => {
       { tagName: "TEXTAREA", inTaskRow: true },
     ];
     for (const target of fields) {
-      for (const k of ["j", "k", "x", " ", "e", "q", "n", "?", "g"]) {
+      for (const k of ["j", "k", "x", " ", "e", "q", "n", "p", "?", "g"]) {
         expect(action(key(k), target), `${JSON.stringify(k)} in ${JSON.stringify(target)}`).toBeNull();
       }
     }
     expect(sequence([["g", 0]], { tagName: "INPUT" }).state.gAt).toBeNull();
   });
 
-  it("is off inside a dialog other than the help", () => {
+  it("is off inside a dialog other than the help (e.g. the Plan My Day panel)", () => {
     const inDialog = { tagName: "BUTTON", inDialog: true };
-    for (const k of ["j", "x", "e", "q", "?", "g"]) {
+    for (const k of ["j", "x", "e", "q", "p", "?", "g"]) {
       expect(action(key(k), inDialog), k).toBeNull();
     }
   });
@@ -200,6 +206,7 @@ describe("resolveShortcut: single keys", () => {
     expect(action(key(" ", { repeat: true }), taskButton)).toBeNull();
     expect(action(key("e", { repeat: true }), taskButton)).toBeNull();
     expect(action(key("q", { repeat: true }))).toBeNull();
+    expect(action(key("p", { repeat: true }))).toBeNull();
     expect(action(key("?", { repeat: true }))).toBeNull();
   });
 
@@ -220,7 +227,7 @@ describe("resolveShortcut: the help dialog", () => {
   });
 
   it("ignores every other shortcut while open (Escape is the dialog's own)", () => {
-    for (const k of ["j", "k", "x", " ", "e", "q", "n", "g", "/", "Escape"]) {
+    for (const k of ["j", "k", "x", " ", "e", "q", "n", "p", "g", "/", "Escape"]) {
       expect(action(key(k), inHelp, true), k).toBeNull();
       expect(action(key(k), taskButton, true), k).toBeNull();
     }
@@ -350,7 +357,32 @@ describe("resolveShortcut: g sequences", () => {
   });
 
   it("never fires go without a g first", () => {
-    for (const k of ["i", "t", "u", "p"]) expect(action(key(k))).toBeNull();
+    for (const k of ["i", "t", "u"]) expect(action(key(k))).toBeNull();
+    // A plain "p" is Plan My Day, not Projects.
+    expect(action(key("p"))).toEqual({ type: "planMyDay" });
+  });
+
+  it("g p stays Projects, and p after a timed-out g is Plan My Day", () => {
+    expect(
+      sequence([
+        ["g", 0],
+        ["p", 100],
+      ]).action,
+    ).toEqual({ type: "go", to: "projects" });
+    expect(
+      sequence([
+        ["g", 0],
+        ["p", G_TIMEOUT_MS + 1],
+      ]).action,
+    ).toEqual({ type: "planMyDay" });
+    // "g p" then "p": the second "p" is fresh.
+    expect(
+      sequence([
+        ["g", 0],
+        ["p", 100],
+        ["p", 200],
+      ]).action,
+    ).toEqual({ type: "planMyDay" });
   });
 });
 

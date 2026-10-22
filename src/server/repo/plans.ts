@@ -200,16 +200,53 @@ export async function suggest(userId: string, today: IsoDate, availableMin: numb
     didntFit: draft.didntFit.map(titled),
     nothingFits: draft.nothingFits ? { shortest: draft.nothingFits.shortest.map(titled) } : null,
     excluded: [...draft.excluded],
-    // TODO(worker A): blocked tasks with titles and open blockers' titles.
-    blocked: [],
+    blocked: blockedTasks(draft.excluded, input.edges, rows),
   };
+}
+
+/**
+ * The excluded-as-blocked tasks with their open direct blockers' titles, from the
+ * rows and edges suggest already loaded (no extra query). Every open task is in
+ * `rows`, so a blocker missing from it isn't open. Both lists are in task order
+ * (sort, createdAt, id), like listOpenTaskTitles.
+ */
+function blockedTasks(
+  excluded: Draft["excluded"],
+  edges: CandidateInput["edges"],
+  rows: Map<string, Task>,
+): BlockedTask[] {
+  const openBlockers = new Map<string, Set<string>>();
+  for (const e of edges) {
+    if (rows.get(e.blockedById)?.status !== "open") continue;
+    let s = openBlockers.get(e.taskId);
+    if (!s) openBlockers.set(e.taskId, (s = new Set()));
+    s.add(e.blockedById);
+  }
+  const ordered = (ids: Iterable<string>) => [...ids].flatMap((id) => rows.get(id) ?? []).sort(compareTaskOrder);
+  return ordered(excluded.filter((x) => x.reason === "blocked").map((x) => x.id)).map((t) => ({
+    id: t.id,
+    title: t.title,
+    projectId: t.projectId,
+    waitingOn: ordered(openBlockers.get(t.id) ?? []).map((b) => b.title),
+  }));
+}
+
+/** sort, then createdAt, then id: the order listOpenTaskTitles uses. */
+function compareTaskOrder(a: Task, b: Task): number {
+  if (a.sort !== b.sort) return a.sort - b.sort;
+  const ta = a.createdAt.getTime();
+  const tb = b.createdAt.getTime();
+  if (ta !== tb) return ta - tb;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /**
  * Appends the accepted suggestions to today's plan, in the given order, after any
  * items already there (whose order is kept). Tasks already in the plan and
- * repeated ids are skipped. Sets the plan's available time when given.
- * Creates the plan row on first use. Returns the ids that were added.
+ * repeated ids are skipped. Ids also in `manualTaskIds` are saved with source
+ * "manual", the rest "suggested"; a manual id not in `taskIds` is ignored. Sets
+ * the plan's available time when given. Creates the plan row on first use.
+ * Returns the ids that were added.
  *
  * Throws NotFoundError when any id isn't one of the user's tasks (another user's
  * task looks missing), and ConflictError, saving nothing, when a task to add isn't
@@ -229,9 +266,10 @@ export async function acceptSuggestions(
     manualTaskIds?: string[];
   },
 ): Promise<string[]> {
-  void manualTaskIds; // TODO(worker A)
   assertIsoDate(today, "today");
   const ids = [...new Set(taskIds)];
+  // Looked up only for ids being added, so a manual id not in taskIds is never added.
+  const manual = new Set(manualTaskIds);
   return db.transaction(async (tx) => {
     const statuses = await lockOwnTasks(tx, userId, ids);
     const plan = await lockPlan(tx, userId, today);
@@ -249,7 +287,7 @@ export async function acceptSuggestions(
           dayPlanId: plan.id,
           taskId,
           position: next + i,
-          source: "suggested" as const,
+          source: manual.has(taskId) ? ("manual" as const) : ("suggested" as const),
         })),
       );
     }

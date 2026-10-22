@@ -62,6 +62,8 @@ export type ShortcutAction =
   | { type: "toggleComplete" }
   | { type: "edit" }
   | { type: "quickAdd" }
+  /** Open the Plan My Day panel (on /today; from elsewhere, go there first). */
+  | { type: "planMyDay" }
   | { type: "toggleHelp" };
 
 /** `gAt` is when a pending "g" was pressed, in the same clock as `now`. */
@@ -92,7 +94,8 @@ export type ShortcutResult = { state: ShortcutState; action: ShortcutAction | nu
  * "?" accepts Shift, since most layouts need it; letters and Space don't.
  * While a "g" is pending (for G_TIMEOUT_MS) the next key is only the second
  * half of "g i/t/u/p": anything else, including a press the guard rejects,
- * cancels it and does nothing else. A held key repeats j/k only.
+ * cancels it and does nothing else. A plain "p" (no "g" pending) is Plan My
+ * Day. A held key repeats j/k only.
  */
 export function resolveShortcut(
   state: ShortcutState,
@@ -129,6 +132,8 @@ export function resolveShortcut(
   if (moves) return act({ type: "move", delta: key === "j" ? 1 : -1 });
   if (key === "g") return { state: { gAt: now }, action: null };
   if (key === "q" || key === "n") return act({ type: "quickAdd" });
+  // Plain "p" only: after a "g" it was handled above as "g p" (Projects).
+  if (key === "p") return act({ type: "planMyDay" });
 
   if (!target?.inTaskRow) return none;
   if (key === "x") return act({ type: "toggleComplete" });
