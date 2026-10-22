@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidTimeZone } from "@/core/time-zone";
 import { DESCRIPTION_MAX, ESTIMATE_MAX_MIN, PROJECT_NAME_MAX, TITLE_MAX } from "./limits";
 
 // Input schemas for server actions. Optional task fields accept null, which clears
@@ -136,3 +137,21 @@ export type SeriesRule = z.output<typeof seriesRule>;
 export type CreateSeriesInput = z.input<typeof createSeriesInput>;
 export type UpdateSeriesInput = z.input<typeof updateSeriesInput>;
 export type SeriesPatch = Omit<z.output<typeof updateSeriesInput>, "id">;
+
+// Settings (spec §7). Omitted keys are left unchanged, so the mismatch banner can
+// switch only the zone.
+
+export const updateSettingsInput = z
+  .object({
+    timeZone: z.string().refine(isValidTimeZone, "Choose a time zone from the list").optional(),
+    defaultEstimateMin: z
+      .number()
+      .int("Default estimate must be whole minutes")
+      .min(1, "Default estimate must be at least 1 minute")
+      .max(ESTIMATE_MAX_MIN, "Default estimate must be at most 24 hours")
+      .optional(),
+  })
+  .refine((v) => v.timeZone !== undefined || v.defaultEstimateMin !== undefined, "Nothing to update");
+
+export type UpdateSettingsInput = z.input<typeof updateSettingsInput>;
+export type SettingsPatch = z.output<typeof updateSettingsInput>;

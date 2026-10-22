@@ -4,6 +4,7 @@ import { localToday, type IsoDate } from "@/core/dates";
 import { normalizeTimeZone } from "@/core/time-zone";
 import { db } from "@/server/db";
 import { userSettings, type UserSettings } from "@/server/db/schema";
+import type { SettingsPatch } from "@/lib/validation";
 
 /** Creates the settings row for a new user; a no-op if it already exists. */
 export async function createUserSettings(userId: string, timeZone: unknown): Promise<void> {
@@ -30,4 +31,13 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
 export async function getUserToday(userId: string, now = new Date()): Promise<IsoDate> {
   const settings = await getUserSettings(userId);
   return localToday(settings.timeZone, now);
+}
+
+/**
+ * Writes the user's zone and/or default estimate. Only the user_settings row
+ * changes: deadlines and occurrence dates are floating dates, so they stay as
+ * they are and only the Today/Upcoming boundaries move with the new zone.
+ */
+export async function updateUserSettings(userId: string, patch: SettingsPatch): Promise<UserSettings> {
+  throw new Error("not implemented");
 }
