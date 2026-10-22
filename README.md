@@ -105,6 +105,24 @@ note when there are more. Another user's project id matches nothing and isn't sh
 Press `/` anywhere in the app (outside text fields and dialogs) to focus the search box, or to open
 `/search` from another page. `Escape` leaves the search box.
 
+## Keyboard
+
+Everything works without a mouse. `?` (or "Shortcuts" in the header) lists the shortcuts. They are
+off while typing in a field, with Ctrl/Meta/Alt held, and inside dialogs. The rules are in
+`src/core/shortcuts.ts`; `src/components/keyboard/` wires them to the page.
+
+- `g` then `i` / `t` / `u` goes to Inbox / Today / Upcoming (within 1.5 s; any other key cancels).
+  `g p` focuses the current project's sidebar link, else the first; with no projects it opens
+  "New project".
+- `j` / `k` move focus down / up through the task rows on the page (all groups, skipping a closed
+  "Completed"). The focused row is highlighted.
+- `x`, or Space on a row, completes or reopens it. When the row moves (into "Completed", off
+  Today), focus goes back to it, or to the row now in its place if it's hidden.
+- `e` (or Enter) opens the row's editor; `e` also puts the cursor in the title. `Escape` closes it
+  and returns focus to the row.
+- `q` / `n` focus quick add. Pages without one go to Inbox and focus its quick add once it
+  renders.
+
 ## Account isolation
 
 One account must never read or change another's data. `tests/integration/isolation/` proves it

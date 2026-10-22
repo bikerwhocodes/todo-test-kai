@@ -5,6 +5,8 @@
  * never thrown: a hand-edited URL shows a broader search, not an error page.
  */
 
+import { acceptsShortcut, type ShortcutKeyEvent, type ShortcutTarget } from "./shortcuts";
+
 export const SEARCH_TEXT_MAX = 200;
 /** Rows shown per search; one more is fetched to know whether there were more. */
 export const SEARCH_LIMIT = 200;
@@ -115,40 +117,14 @@ export function escapeLike(text: string): string {
 // ---------------------------------------------------------------------------------------
 // The "/" shortcut
 
-export type ShortcutKeyEvent = {
-  key: string;
-  ctrlKey: boolean;
-  metaKey: boolean;
-  altKey: boolean;
-  defaultPrevented?: boolean;
-  isComposing?: boolean;
-};
-
-/** What the shortcut needs to know about the focused element (event.target). */
-export type ShortcutTarget = {
-  /** Upper-case tag name, as the DOM reports it. */
-  tagName: string;
-  /** `type` attribute for inputs. */
-  type?: string;
-  isContentEditable?: boolean;
-  /** Inside an open <dialog> or an element with role="dialog"/aria-modal. */
-  inDialog?: boolean;
-};
-
-// Inputs that take no typed text; "/" pressed on them can't be meant as input.
-const NON_TEXT_INPUTS = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image"]);
+export type { ShortcutKeyEvent, ShortcutTarget };
 
 /**
- * Whether a keydown should jump to search: a bare "/" (Shift is allowed, since
- * some layouts need it to type "/"), not while composing, and not while the
- * user is typing into a field or working in a dialog.
+ * Whether a keydown should jump to search: a "/" that passes the shared
+ * shortcut guard (no Ctrl/Meta/Alt, not composing, not typing into a field or
+ * working in a dialog). Shift is allowed, since some layouts (e.g. German)
+ * need it to type "/"; "?" is told apart by `key`, which is "?" not "/".
  */
 export function shouldFocusSearch(event: ShortcutKeyEvent, target: ShortcutTarget | null): boolean {
-  if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return false;
-  if (event.defaultPrevented || event.isComposing) return false;
-  if (!target) return true;
-  if (target.isContentEditable || target.inDialog) return false;
-  if (target.tagName === "TEXTAREA" || target.tagName === "SELECT") return false;
-  if (target.tagName === "INPUT") return NON_TEXT_INPUTS.has((target.type ?? "text").toLowerCase());
-  return true;
+  return event.key === "/" && acceptsShortcut(event, target);
 }

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useId, useState, useTransition } from "react";
 import { PROJECT_NAME_MAX } from "@/lib/limits";
 import { createProjectAction } from "@/server/actions/projects";
-import { inputClass, quietButtonClass } from "@/components/ui";
+import { focusRingClass, inputClass, quietButtonClass } from "@/components/ui";
 
 export function NewProjectForm() {
   const router = useRouter();
@@ -38,7 +38,8 @@ export function NewProjectForm() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-md px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-100 hover:text-stone-900"
+        data-new-project
+        className={`rounded-md px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-100 hover:text-stone-900 ${focusRingClass}`}
       >
         + New project
       </button>
@@ -52,6 +53,7 @@ export function NewProjectForm() {
       </label>
       <input
         id={inputId}
+        data-new-project
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {

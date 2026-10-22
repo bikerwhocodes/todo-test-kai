@@ -4,6 +4,8 @@ import { useRef, useState, useTransition } from "react";
 import { createTaskAction } from "@/server/actions/tasks";
 import { inputClass } from "@/components/ui";
 
+export const QUICK_ADD_ID = "quick-add";
+
 export function QuickAdd({ projectId, placeholder }: { projectId: string | null; placeholder: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
@@ -33,12 +35,12 @@ export function QuickAdd({ projectId, placeholder }: { projectId: string | null;
 
   return (
     <form onSubmit={onSubmit} className="mb-6">
-      <label htmlFor="quick-add" className="sr-only">
+      <label htmlFor={QUICK_ADD_ID} className="sr-only">
         New task title
       </label>
       <input
         ref={inputRef}
-        id="quick-add"
+        id={QUICK_ADD_ID}
         value={title}
         onChange={(e) => {
           setTitle(e.target.value);

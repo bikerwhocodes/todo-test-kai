@@ -1,3 +1,4 @@
+import { focusRingClass } from "@/components/ui";
 import { TaskRow } from "./task-row";
 import type { ProjectOption, TaskOption, TaskView } from "./types";
 
@@ -30,7 +31,7 @@ export function TaskList({
 
       {done.length > 0 && (
         <details className="mt-6">
-          <summary className="cursor-pointer rounded-md py-1 text-sm font-medium text-stone-600 select-none hover:text-stone-900">
+          <summary className={`cursor-pointer rounded-md py-1 text-sm font-medium text-stone-600 select-none hover:text-stone-900 ${focusRingClass}`}>
             Completed ({done.length})
           </summary>
           <ul aria-label="Completed tasks" className="mt-2">

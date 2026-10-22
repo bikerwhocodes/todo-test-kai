@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { focusRingClass } from "@/components/ui";
 
 export type NavItem = { href: string; label: string };
 
@@ -22,20 +23,22 @@ export function NavLinks({ primary, projects }: { primary: NavItem[]; projects: 
           />
         )}
         {projects.map((item) => (
-          <NavLink key={item.href} item={item} active={pathname === item.href} />
+          <NavLink key={item.href} item={item} active={pathname === item.href} project />
         ))}
       </ul>
     </nav>
   );
 }
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+/** Project links are marked for the "g p" shortcut, which focuses them. */
+function NavLink({ item, active, project }: { item: NavItem; active: boolean; project?: boolean }) {
   return (
     <li className="shrink-0">
       <Link
         href={item.href}
         aria-current={active ? "page" : undefined}
-        className={`block max-w-48 truncate rounded-md px-3 py-1.5 text-sm ${
+        data-project-link={project || undefined}
+        className={`block max-w-48 truncate rounded-md px-3 py-1.5 text-sm ${focusRingClass} ${
           active ? "bg-stone-200 font-medium text-stone-900" : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
         }`}
       >

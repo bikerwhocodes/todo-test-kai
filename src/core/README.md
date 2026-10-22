@@ -59,4 +59,21 @@ The `/search` URL contract (see the main README for the params).
 | `searchQueryToParams(query)`, `searchHref(query)` | Canonical: fixed key order, defaults omitted. Round-trips through `parseSearchQuery`. |
 | `hasActiveFilters(query)` | Anything other than the default (open tasks, no text). |
 | `escapeLike(text)` | Escapes `\`, `%` and `_` for `LIKE`/`ILIKE`. |
-| `shouldFocusSearch(event, target)` | Whether a keydown is the `/` shortcut (not in text fields, dialogs, or with Ctrl/Meta/Alt). |
+| `shouldFocusSearch(event, target)` | Whether a keydown is the `/` shortcut. Uses `acceptsShortcut` from `core/shortcuts`; Shift is allowed (some layouts need it for `/`), and `?` never matches. |
+
+## Shortcuts (`core/shortcuts.ts`)
+
+The app-wide keyboard shortcuts, minus `/` (above). `components/keyboard` describes each keydown and the focused element and acts on the result.
+
+| Function | Notes |
+|---|---|
+| `isTypingTarget(target)` | Text-like inputs, textarea, select, contenteditable. Checkboxes, buttons and the like don't count. |
+| `acceptsShortcut(event, target)` | The shared guard: no Ctrl/Meta/Alt, not already handled or composing, not typing, not in a dialog. |
+| `resolveShortcut(state, event, target, { now, helpOpen })` | Returns `{ state, action }`. `g` then `i`/`t`/`u`/`p` goes to Inbox/Today/Upcoming/Projects, `j`/`k` move, `x` (or Space on a row's main button) toggles complete, `e` edits, `q`/`n` quick add, `?` toggles help. |
+| `moveIndex(current, delta, count)` | The row to focus after `j`/`k`, clamped; from no row (`-1`) either key picks the first. |
+
+Semantics:
+- `now` is the keydown's time (e.g. `event.timeStamp`). A `g` waits `G_TIMEOUT_MS` (1.5 s) for its second key; any other key, or a press the guard rejects, cancels it and does nothing else. A bare modifier press leaves it pending.
+- `x` and `e` need focus in a task row (`target.inTaskRow`). Space elsewhere keeps its native meaning.
+- Shift is accepted only for `?`. Caps Lock is ignored. A held key repeats only `j`/`k`.
+- While the help dialog is open (`helpOpen`), only `?` (to close it) is a shortcut; Escape is the dialog's own.

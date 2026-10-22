@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { SignOutButton } from "@/components/auth/sign-out-button";
+import { KeyboardShortcuts } from "@/components/keyboard/keyboard-shortcuts";
 import { NavLinks } from "@/components/projects/nav-links";
 import { NewProjectForm } from "@/components/projects/new-project-form";
 import { SearchShortcut } from "@/components/search/search-shortcut";
+import { focusRingClass } from "@/components/ui";
 import { listProjects } from "@/server/repo/projects";
 import { requireUser } from "@/server/session";
 
@@ -16,6 +18,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <span className="font-semibold tracking-tight">NextUp</span>
         <div className="flex items-center gap-3 text-sm text-stone-600">
           <span className="hidden sm:inline">{user.email}</span>
+          <KeyboardShortcuts />
           <SignOutButton />
         </div>
       </header>
@@ -36,7 +39,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </div>
             <Link
               href="/projects/archived"
-              className="rounded-md px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 hover:text-stone-900"
+              className={`rounded-md px-3 py-1.5 text-sm text-stone-500 hover:bg-stone-100 hover:text-stone-900 ${focusRingClass}`}
             >
               Archived
             </Link>

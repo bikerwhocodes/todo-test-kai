@@ -3,6 +3,7 @@
 import { useId, useOptimistic, useRef, useState, useTransition } from "react";
 import { formatDeadline, formatEstimate, formatPriority, formatWaitingOn } from "@/core/format";
 import { setTaskCompletedAction } from "@/server/actions/tasks";
+import { focusRingClass } from "@/components/ui";
 import { TaskEditor } from "./task-editor";
 import type { BlockerView, ProjectOption, TaskOption, TaskView } from "./types";
 
@@ -51,10 +52,12 @@ export function TaskRow({
     toggleRef.current?.focus();
   }
 
+  // The data-task-* attributes are what the keyboard shortcuts (components/keyboard) look for.
   return (
-    <li className="border-b border-stone-200 last:border-b-0">
-      <div className="flex items-start gap-3 py-2">
+    <li data-task-row data-task-id={task.id} className="border-b border-stone-200 last:border-b-0">
+      <div className="-mx-1.5 flex items-start gap-3 rounded-md px-1.5 py-2 has-focus-visible:bg-stone-100">
         <input
+          data-task-checkbox
           type="checkbox"
           checked={done}
           onChange={onToggleDone}
@@ -63,11 +66,12 @@ export function TaskRow({
         />
         <button
           ref={toggleRef}
+          data-task-button
           type="button"
           aria-expanded={expanded}
           aria-controls={expanded ? editorId : undefined}
           onClick={() => setExpanded((open) => !open)}
-          className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
+          className={`min-w-0 flex-1 rounded-md text-left ${focusRingClass}`}
         >
           <span className={`block break-words ${done ? "text-stone-500 line-through" : ""}`}>{task.title}</span>
           <TaskMeta task={task} done={done} today={today} projectLabel={projectLabel} overdueBy={overdueBy} />

@@ -205,6 +205,11 @@ describe("shouldFocusSearch", () => {
     expect(shouldFocusSearch(key("/"), { tagName: "A" })).toBe(true);
   });
 
+  it("allows Shift (some layouts need it for /) but never fires on ?", () => {
+    expect(shouldFocusSearch(key("/", { shiftKey: true }), body)).toBe(true);
+    expect(shouldFocusSearch(key("?", { shiftKey: true }), body)).toBe(false);
+  });
+
   it("ignores other keys and modified /", () => {
     expect(shouldFocusSearch(key("?"), body)).toBe(false);
     expect(shouldFocusSearch(key("k"), body)).toBe(false);
