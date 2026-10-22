@@ -24,6 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLinks
             primary={[
               { href: "/today", label: "Today" },
+              { href: "/upcoming", label: "Upcoming" },
               { href: "/inbox", label: "Inbox" },
               { href: "/search", label: "Search" },
             ]}

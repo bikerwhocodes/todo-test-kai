@@ -15,6 +15,7 @@ import ProjectPage, { generateMetadata as projectMetadata } from "@/app/(app)/pr
 import ArchivedProjectsPage from "@/app/(app)/projects/archived/page";
 import SearchPage from "@/app/(app)/search/page";
 import TodayPage from "@/app/(app)/today/page";
+import UpcomingPage from "@/app/(app)/upcoming/page";
 import { NOT_FOUND, actAs } from "../next-mocks";
 import { PAGE_COVERAGE, type CoveredPage, type FileCases } from "./registry";
 import { expectNoneOf, expectSomeOf, seedWorld, snapshotOf, type World } from "./world";
@@ -39,11 +40,21 @@ const PAGE_CASES: FileCases<CoveredPage> = {
   ],
   "src/app/(app)/today/page.tsx": [
     [
-      "shows B's time zone, not A's",
+      "shows B's time zone and due tasks, not A's",
       async ({ a, b }) => {
         const tree = await TodayPage();
         expectNoneOf(a, tree);
-        expectSomeOf(b, tree, b.timeZone);
+        expectSomeOf(b, tree, b.timeZone, b.dueTask.title);
+      },
+    ],
+  ],
+  "src/app/(app)/upcoming/page.tsx": [
+    [
+      "lists only B's tasks with deadlines",
+      async ({ a, b }) => {
+        const tree = await UpcomingPage();
+        expectNoneOf(a, tree);
+        expectSomeOf(b, tree, b.dueTask.title, b.project.name);
       },
     ],
   ],

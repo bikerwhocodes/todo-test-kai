@@ -254,7 +254,8 @@ export const PAGE_COVERAGE = {
   "src/app/(auth)/login/page.tsx": { exempt: "Signed-out form; reads no data." },
   "src/app/(auth)/signup/page.tsx": { exempt: "Signed-out form; reads no data." },
   "src/app/(app)/layout.tsx": { cases: "Nav lists only the caller's projects and email." },
-  "src/app/(app)/today/page.tsx": { cases: "Shows the caller's own time zone." },
+  "src/app/(app)/today/page.tsx": { cases: "Shows the caller's own time zone and due tasks." },
+  "src/app/(app)/upcoming/page.tsx": { cases: "Lists only the caller's tasks with deadlines, grouped in the caller's zone." },
   "src/app/(app)/inbox/page.tsx": {
     cases: "Lists only the caller's inbox tasks, their blockers, and the caller's projects and open tasks to pick from.",
   },

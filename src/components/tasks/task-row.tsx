@@ -18,6 +18,7 @@ export function TaskRow({
   taskOptions,
   today,
   projectLabel,
+  overdueBy,
 }: {
   task: TaskView;
   projects: ProjectOption[];
@@ -25,6 +26,8 @@ export function TaskRow({
   today: string;
   /** Where the task lives ("Inbox" or a project name), for lists that mix projects. */
   projectLabel?: string;
+  /** Shown first in the meta line while the task is open, e.g. "3 days overdue". */
+  overdueBy?: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [done, setDone] = useOptimistic(task.done);
@@ -67,7 +70,7 @@ export function TaskRow({
           className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-stone-300"
         >
           <span className={`block break-words ${done ? "text-stone-500 line-through" : ""}`}>{task.title}</span>
-          <TaskMeta task={task} done={done} today={today} projectLabel={projectLabel} />
+          <TaskMeta task={task} done={done} today={today} projectLabel={projectLabel} overdueBy={overdueBy} />
         </button>
       </div>
       {error && (
@@ -89,16 +92,26 @@ function TaskMeta({
   done,
   today,
   projectLabel,
+  overdueBy,
 }: {
   task: TaskView;
   done: boolean;
   today: string;
   projectLabel?: string;
+  overdueBy?: string | null;
 }) {
   const priority = formatPriority(task.priority);
   const subtasksDone = task.subtasks.filter((s) => s.done).length;
   const overdue = !done && task.deadline !== null && task.deadline < today;
   const chips: React.ReactNode[] = [];
+
+  if (overdueBy && !done) {
+    chips.push(
+      <span key="o" className="font-medium text-red-700">
+        {overdueBy}
+      </span>,
+    );
+  }
 
   if (projectLabel) {
     chips.push(

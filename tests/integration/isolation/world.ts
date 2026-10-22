@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { expect } from "vitest";
 import { db } from "@/server/db";
+import { localToday } from "@/core/dates";
 import { session, taskDependencies, type Project, type Subtask, type Task, type TaskDependency } from "@/server/db/schema";
 import { addBlocker } from "@/server/repo/dependencies";
 import { createProject, setProjectArchived } from "@/server/repo/projects";
@@ -25,6 +26,8 @@ export type Account = SignedUp & {
   projectTask: Task;
   completedTask: Task;
   archivedProjectTask: Task;
+  /** Inbox task due on the user's local today, so it shows on Today and Upcoming. */
+  dueTask: Task;
   subtask: Subtask;
   /** projectTask is blocked by inboxTask (both open, so projectTask shows "Waiting on"). */
   dependency: TaskDependency;
@@ -66,6 +69,8 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
   });
   let completedTask = await createTask(user.id, { title: `${marker} completed task` });
   completedTask = await setTaskCompleted(user.id, completedTask.id, true);
+  let dueTask = await createTask(user.id, { title: `${marker} due task` });
+  dueTask = await updateTask(user.id, dueTask.id, { deadline: localToday(timeZone, new Date()) });
   const subtask = await addSubtask(user.id, projectTask.id, `${marker} subtask`);
   await addBlocker(user.id, projectTask.id, inboxTask.id);
   const [dependency] = await db.select().from(taskDependencies).where(eq(taskDependencies.userId, user.id));
@@ -82,6 +87,7 @@ async function seedAccount(slug: string, marker: string, timeZone: string): Prom
     projectTask,
     completedTask,
     archivedProjectTask,
+    dueTask,
     subtask,
     dependency,
   };
@@ -119,6 +125,7 @@ export function fingerprints(account: Account): string[] {
     account.projectTask.id,
     account.completedTask.id,
     account.archivedProjectTask.id,
+    account.dueTask.id,
     account.subtask.id,
   ];
 }

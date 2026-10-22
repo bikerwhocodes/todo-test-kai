@@ -12,6 +12,7 @@ import {
   renameProject,
   setProjectArchived,
 } from "@/server/repo/projects";
+import { listDueTasks, listUpcomingTasks } from "@/server/repo/agenda";
 import { searchTasks } from "@/server/repo/search";
 import { addSubtask, deleteSubtask, updateSubtask } from "@/server/repo/subtasks";
 import {
@@ -59,6 +60,19 @@ describe("tasks", () => {
     expect(await getTask(b, aInboxTask.id)).toBeNull();
     expect(await listInboxTasks(b)).toEqual({ open: [], done: [] });
     expect(await listProjectTasks(b, aProject.id)).toEqual({ open: [], done: [] });
+  });
+
+  it("B's Upcoming and due lists hold none of A's tasks", async () => {
+    await updateTask(a, aTask.id, { deadline: "2026-10-20" });
+    await updateTask(a, aInboxTask.id, { deadline: "2026-10-22" });
+    const bTask = await createTask(b, { title: "Bob's task" });
+    await updateTask(b, bTask.id, { deadline: "2026-10-22" });
+
+    expect(ids(await listUpcomingTasks(b, "2026-10-22"))).toEqual([bTask.id]);
+    expect(ids(await listDueTasks(b, "2026-10-22"))).toEqual([bTask.id]);
+    // A's subtasks aren't attached to B's rows either.
+    expect((await listDueTasks(b, "2026-10-22"))[0]!.subtasks).toEqual([]);
+    expect(ids(await listDueTasks(a, "2026-10-22"))).toEqual([aTask.id, aInboxTask.id]);
   });
 
   it("B cannot update, complete or delete A's task, and A's row is unchanged", async () => {
